@@ -90,8 +90,10 @@ Then visit:
 - Grafana: `http://127.0.0.1:3000`
 - HOMER: `http://127.0.0.1:8080`
 
-Next, configure each PBX using the [PBX agent guide](pbx-agent/README.md), then
-add its private addresses under `/opt/monitoring/prometheus/targets/`.
+Next, configure each PBX using the
+[native FS PBX SIP Capture workflow](pbx-agent/README.md#1-native-hep-capture)
+and the rest of the [PBX agent guide](pbx-agent/README.md), then add its private
+addresses under `/opt/monitoring/prometheus/targets/`.
 
 ## Reboot behavior
 

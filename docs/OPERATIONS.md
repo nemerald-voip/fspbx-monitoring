@@ -173,11 +173,47 @@ availability before recreating data.
 
 ### SIP is absent from HOMER
 
-1. Confirm the FreeSWITCH Sofia profile has HEP capture enabled.
-2. Confirm its destination is MON01 UDP 9060.
-3. Confirm the PBX source is allowed by the MON01/provider firewall.
-4. Inspect PBX egress and MON01 ingress with a short, authorized packet capture.
-5. Confirm each PBX has a unique capture ID.
+Trace the capture path in order so a local configuration success is not mistaken
+for successful HOMER delivery:
+
+1. **Persisted:** On the affected PBX, confirm `vars.xml` contains its
+   hostname-scoped capture ID:
+
+   ```bash
+   grep 'hep_capture_id' /etc/freeswitch/vars.xml
+   ```
+
+2. **Runtime:** Confirm FreeSWITCH is running as the expected physical server,
+   has the same live ID, and still has the selected profiles running:
+
+   ```bash
+   fs_cli -x 'switchname'
+   fs_cli -x 'global_getvar hep_capture_id'
+   fs_cli -x 'sofia status' | grep -E 'internal|external'
+   ```
+
+3. **PBX emission:** Replace `MONITORING_IP`, start a short capture, and place or
+   receive a test call:
+
+   ```bash
+   sudo tcpdump -n -q -i any \
+     'udp dst host MONITORING_IP and dst port 9060'
+   ```
+
+   Use `tcp` instead of `udp` when configured. If no packet appears, review the
+   collector, port, selected Sofia profiles, and the
+   [native FS PBX setup](../pbx-agent/README.md#1-native-hep-capture).
+
+4. **MON01 ingest:** Confirm the PBX source is permitted by the provider and
+   Docker-aware host firewalls. Run a corresponding short, authorized capture
+   on MON01, then verify that the test call appears in HOMER under the PBX's
+   expected capture ID.
+
+A successful capture with `127.0.0.1` as the collector proves only persistence,
+runtime state, and local HEP generation. It does not prove network routing,
+firewall access, MON01 receipt, or HOMER ingestion. Every physical FreeSWITCH
+server, including each node in a redundant system, must have a unique unsigned
+numeric capture ID.
 
 Do not commit packet captures or leave broad captures running indefinitely.
 

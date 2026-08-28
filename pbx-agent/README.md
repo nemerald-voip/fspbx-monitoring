@@ -21,20 +21,99 @@ call processing.
 
 ## 1. Native HEP capture
 
-Copy the settings from
-`freeswitch/capture-server.xml.snippet` into every relevant Sofia profile. Set
-`MONITORING_IP` to the monitoring server's private/VPN address and assign a
-different numeric `capture_id` to each PBX.
+### Configure current FS PBX systems
 
-Reload the profile or restart FreeSWITCH, then verify:
+In FS PBX, open **System Settings -> SIP Capture**.
+
+1. Enable SIP capture.
+2. Select UDP unless the monitoring network requires TCP.
+3. Enter the reachable private/VPN address of the HOMER monitoring server.
+4. Keep port `9060` unless HOMER uses a different HEP port.
+5. Select the Sofia profiles to capture, normally `internal` and `external`.
+6. Confirm that **Current server** shows the expected FreeSWITCH hostname, then
+   save.
+
+FS PBX automatically:
+
+- identifies the current physical server using its FreeSWITCH hostname;
+- creates a hostname-scoped `hep_capture_id` switch variable;
+- assigns `101` to the first server and increments the highest existing ID for
+  each additional server;
+- stores the collector with `capture_id=$${hep_capture_id}`;
+- rebuilds the local `vars.xml`;
+- sets the live FreeSWITCH global variable;
+- regenerates the local Sofia configuration; and
+- rescans the selected profiles and enables capture without restarting them.
+
+HEP capture IDs are unsigned numeric identifiers. They identify physical
+FreeSWITCH servers in HOMER, not logical PBX systems. The monitoring server
+remains outside the live call path: losing HOMER or HEP connectivity does not
+interrupt calls or registrations.
+
+### Redundant FS PBX servers
+
+Configure the same collector on every server in the redundant system. Save the
+first server, allow its switch-variable database row to replicate, and then
+open and save **System Settings -> SIP Capture** on the next server. Repeat this
+sequence for every node.
+
+Each physical FreeSWITCH server must have its own capture ID, even when several
+servers form one redundant PBX system. Saving on each server is required because
+`vars.xml`, the live global variable, the generated Sofia cache, and the profile
+rescan are local to that server. Before saving each node, confirm that
+**Current server** displays its expected FreeSWITCH hostname.
+
+### Verify the PBX configuration
+
+Check the current server identity and live capture ID:
 
 ```bash
-fs_cli -x "sofia global capture on"
-tcpdump -ni any udp port 9060
+fs_cli -x 'switchname'
+fs_cli -x 'global_getvar hep_capture_id'
 ```
+
+Check the persistent variable and confirm that the selected profiles remain
+running:
+
+```bash
+grep 'hep_capture_id' /etc/freeswitch/vars.xml
+fs_cli -x 'sofia status' | grep -E 'internal|external'
+```
+
+Confirm that the PBX emits HEP traffic, replacing `MONITORING_IP` first:
+
+```bash
+sudo tcpdump -n -q -i any \
+  'udp dst host MONITORING_IP and dst port 9060'
+```
+
+Use `tcp` instead of `udp` in the filter if TCP was selected. Place or receive a
+test call, then run a corresponding short capture on MON01 and confirm that the
+call appears in HOMER under the expected capture ID. This distinguishes local
+HEP generation from routing, firewall, and HOMER ingestion success.
+
+Using `127.0.0.1` as the collector is useful only for confirming local HEP
+generation. It does not test network routing, firewalls, MON01, or HOMER
+ingestion. Do not print or publish complete generated Sofia XML because it can
+contain SIP gateway credentials.
 
 Allow PBX source addresses to reach MON01 on UDP 9060. TCP 9060 is supported as
 an alternative. Do not expose the HOMER UI publicly just to ingest HEP.
+
+### Manual XML fallback
+
+Use manual XML only on older or unmanaged FreeSWITCH systems without the native
+FS PBX SIP Capture page. `capture-server` is a global Sofia setting;
+`sip-capture` belongs inside each selected profile's `<settings>` section. Copy
+and adapt `freeswitch/capture-server.xml.snippet`, replace `MONITORING_IP`, and
+assign a unique unsigned numeric `capture_id` to every physical FreeSWITCH
+server.
+
+Apply the configuration using the change procedure appropriate for that system.
+Manual changes may require a profile rescan, reload, or restart; schedule any
+potentially disruptive action in a maintenance window. Do not use
+`sofia global capture on` as the normal FS PBX workflow because it enables
+capture for every profile rather than only those selected in the UI.
 
 ## 2. Host and FreeSWITCH metrics
 

@@ -187,12 +187,16 @@ TLS and authentication first and review the bind settings in `.env`.
 
 ## 6. Configure the first PBX
 
-Central installation alone does not produce PBX telemetry. Follow
-[`pbx-agent/README.md`](../pbx-agent/README.md) on each FreeSWITCH host.
+Central installation alone does not produce PBX telemetry. Follow the
+[native FS PBX SIP Capture instructions](../pbx-agent/README.md#1-native-hep-capture)
+and the remaining [`pbx-agent/README.md`](../pbx-agent/README.md) setup on each
+FreeSWITCH host.
 
 At minimum:
 
-1. Enable native FreeSWITCH HEP capture to MON01 UDP 9060.
+1. Enable native FreeSWITCH HEP capture to MON01 UDP 9060 for the selected
+   profiles. Current FS PBX systems assign each physical server a capture ID
+   automatically, starting at `101`.
 2. Expose node_exporter TCP 9100 only to MON01/VPN.
 3. Run freeswitch_exporter TCP 9282 beside FreeSWITCH, with ESL kept on
    `127.0.0.1:8021`.

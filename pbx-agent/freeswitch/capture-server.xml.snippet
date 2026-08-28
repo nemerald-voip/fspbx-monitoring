@@ -1,4 +1,11 @@
-<!-- Add capture-server to each Sofia profile's <settings> section. Use a
-     unique capture_id for every PBX. -->
-<param name="capture-server" value="udp:MONITORING_IP:9060;hep=3;capture_id=101"/>
+<!-- Manual fallback for systems without the FS PBX SIP Capture page.
+     Use a unique unsigned numeric capture_id for every physical server. -->
+
+<!-- Add once to the global Sofia settings. -->
+<global_settings>
+  <param name="capture-server"
+         value="udp:MONITORING_IP:9060;hep=3;capture_id=101"/>
+</global_settings>
+
+<!-- Add inside <settings> for each Sofia profile that should be captured. -->
 <param name="sip-capture" value="yes"/>

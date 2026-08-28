@@ -112,8 +112,11 @@ HTTP endpoint must not be exposed directly to untrusted networks.
 
 ## SIP and RTP visibility
 
-Native FreeSWITCH HEP capture sends SIP signaling to HOMER. Each PBX should use
-a unique numeric capture ID so HOMER can distinguish nodes.
+Native FreeSWITCH HEP capture sends SIP signaling to HOMER. HEP capture IDs are
+unsigned numeric identifiers for physical FreeSWITCH nodes, not logical PBX or
+redundant clusters. Current FS PBX systems assign them automatically starting at
+`101`; each server in a redundant system still receives its own ID so HOMER can
+distinguish the nodes.
 
 The optional RTP capture is deliberately PBX-local. It records truncated packet
 headers in a fixed-size ring and does not forward media to MON01. It is designed
