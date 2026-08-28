@@ -10,6 +10,7 @@ call processing must continue independently.
 flowchart LR
     PBX[FreeSWITCH PBX]
     HEP[Native HEP capture]
+    RTCP[RTCP quality sensor]
     NE[node_exporter]
     FE[freeswitch_exporter]
     AL[Grafana Alloy]
@@ -23,6 +24,7 @@ flowchart LR
     GRAF[Grafana]
 
     PBX --> HEP -->|UDP/TCP 9060| HOMER
+    PBX --> RTCP -->|HEP type 5, UDP/TCP 9060| HOMER
     PBX --> NE -->|TCP 9100| PROM
     PBX --> FE -->|TCP 9282| PROM
     PBX --> AL -->|private/authenticated HTTP| LOKI
@@ -73,6 +75,7 @@ Prometheus can observe MON01.
 PBX-side requirements:
 
 - HEP: PBX to MON01 UDP 9060; TCP is also supported.
+- RTCP quality: PBX to MON01 on the same HEP transport and allowlist.
 - node_exporter: MON01 to PBX TCP 9100.
 - freeswitch_exporter: MON01 to PBX TCP 9282.
 - ESL: local exporter to FreeSWITCH `127.0.0.1:8021`; never remotely exposed.
@@ -114,13 +117,21 @@ HTTP endpoint must not be exposed directly to untrusted networks.
 
 Native FreeSWITCH HEP capture sends SIP signaling to HOMER. HEP capture IDs are
 unsigned numeric identifiers for physical FreeSWITCH nodes, not logical PBX or
-redundant clusters. Current FS PBX systems assign them automatically starting at
-`101`; each server in a redundant system still receives its own ID so HOMER can
-distinguish the nodes.
+redundant clusters. Current FS PBX systems generate and persist a random,
+nonzero unsigned 32-bit ID for each hostname. Each server in a redundant system
+still receives its own ID so HOMER can distinguish the nodes.
 
-The optional RTP capture is deliberately PBX-local. It records truncated packet
-headers in a fixed-size ring and does not forward media to MON01. It is designed
-for loss, jitter, sequence, timing, and addressing analysis—not audio playback.
+The PBX-side RTCP sensor reads SIP/SDP only to build an in-memory Call-ID map,
+then sends decoded RTCP reports to HOMER as HEP type 5. Its correlation-only
+SIP socket has no transport, so native FreeSWITCH HEP remains the single SIP
+source and continues to cover TLS signaling. The sensor writes no PCAP and has
+no disk queue. HOMER stores correlated quality reports centrally in
+`homer_data`; see [Centralized RTP/RTCP quality](RTP_QUALITY.md).
+
+RTCP receiver reports identify loss and jitter on the path into the reporting
+endpoint. Reports from FreeSWITCH measure remote-to-PBX media; reports from a
+remote endpoint measure PBX-to-remote media. Missing peer reports, SRTCP,
+bypass media, or unusable SDP can leave one direction unmeasured.
 
 ## Persistence and retention
 
@@ -166,6 +177,7 @@ The reconciler also recreates the declared stack after a previous
 - Loki down: remote log delivery may back off or drop according to agent limits.
 - PBX exporter down: only its monitoring target fails.
 - HEP delivery blocked: HOMER loses capture; FreeSWITCH signaling continues.
+- RTCP sensor down: call-quality history is incomplete; media continues.
 
 No PBX should synchronously depend on a central monitoring response.
 
@@ -175,7 +187,7 @@ No PBX should synchronously depend on a central monitoring response.
 2. Local deployment configuration: `.env` and `prometheus/targets/*.yml`.
 3. Persistent runtime state: named Docker volumes.
 4. PBX-local configuration: systemd environments, FreeSWITCH snippets, and
-   optional capture files.
+   the live RTCP sensor configuration.
 
 Keeping these layers separate makes upgrades repeatable without committing
 secrets or infrastructure inventory.

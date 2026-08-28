@@ -86,9 +86,11 @@ logs and the relevant Prometheus target or UI.
 - `loki/loki.yml`: single-node filesystem storage and retention.
 - `alertmanager/`: default no-op alert delivery configuration.
 - `blackbox/`: HTTP and TCP probe modules.
-- `pbx-agent/`: PBX-side FreeSWITCH, exporter, Alloy, and RTP-capture examples.
+- `pbx-agent/`: PBX-side FreeSWITCH, exporter, Alloy, and RTCP sensor examples.
+- `pbx-agent/rtcp-quality/`: live RTCP-to-HEP sensor and repeatable installer.
 - `synthetic/`: SIPp OPTIONS scenario, publisher, and timer/service templates.
 - `docs/SYNTHETIC_SIP.md`: scheduled SIP transaction setup and limitations.
+- `docs/RTP_QUALITY.md`: centralized RTCP quality setup and interpretation.
 - `docs/FIREWALL.md`: provider/VPN and Docker-aware HEP restriction examples.
 - `docs/`: operator-facing deployment, architecture, and operations guides.
 - `.github/workflows/`: validation and tag-triggered release workflows.

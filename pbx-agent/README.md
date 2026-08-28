@@ -14,7 +14,7 @@ and record these per-node values:
 | HEP capture ID | Unique numeric ID for this PBX |
 | MON01 address | Private/VPN address whenever possible |
 | ESL password | Long random local secret; never stored in this repository |
-| RTP range | Exact range used by this FreeSWITCH configuration |
+| SIP and RTP ranges | Exact ranges used by this FreeSWITCH configuration |
 
 Apply one telemetry layer at a time and confirm that disabling it does not alter
 call processing.
@@ -37,8 +37,8 @@ FS PBX automatically:
 
 - identifies the current physical server using its FreeSWITCH hostname;
 - creates a hostname-scoped `hep_capture_id` switch variable;
-- assigns `101` to the first server and increments the highest existing ID for
-  each additional server;
+- generates and persists a random, nonzero unsigned 32-bit capture ID scoped to
+  the current server's hostname;
 - stores the collector with `capture_id=$${hep_capture_id}`;
 - rebuilds the local `vars.xml`;
 - sets the live FreeSWITCH global variable;
@@ -146,33 +146,23 @@ Grant the Alloy service account read access to only the selected log files.
 Remove unused paths from `config.alloy` so nonexistent or sensitive logs are not
 collected.
 
-## 4. Bounded RTP header capture (optional)
+## 4. Centralized RTCP quality
 
-This captures only the configured RTP UDP range, truncates every packet to 128
-bytes, and enforces a fixed-size ring. It does not forward RTP to MON01.
+Enable `rtcp-audio-interval-msec=5000` through the FS PBX Sofia profile editor
+on every profile that carries media. Applying a profile change can affect calls
+and registrations, so follow the platform's maintenance procedure.
 
-```bash
-apt install wireshark-common
-install -d -m 0750 /var/capture
-install -m 0755 rtp-capture/rtp-capture.sh /usr/local/sbin/fs-rtp-capture
-install -m 0644 rtp-capture/rtp-capture.service /etc/systemd/system/
-install -m 0600 rtp-capture/rtp-capture.env.example /etc/default/fs-rtp-capture
-systemctl daemon-reload
-systemctl enable --now rtp-capture
-```
-
-Confirm the interface and RTP port range before starting. The default cap is 8
-GiB (`262144 KiB x 32`), with oldest files overwritten. Prefer a dedicated
-`/var/capture` filesystem. Header-only capture preserves addressing, sequence,
-timestamp, SSRC, timing, jitter, and loss analysis but not playable audio.
-
-Check capture drops and disk use regularly:
+Then install the live sensor on each physical PBX:
 
 ```bash
-systemctl status rtp-capture
-journalctl -u rtp-capture
-du -sh /var/capture
+sudo ./rtcp-quality/install.sh --monitoring-ip MON01_IP
 ```
+
+The sensor uses SIP/SDP in memory to correlate RTCP but does not forward SIP,
+RTP payloads, or packet captures. Decoded RTCP reports go to HOMER over the same
+HEP 9060 allowlist and populate the transaction **QoS** view. Read the complete
+[centralized RTP/RTCP procedure](../docs/RTP_QUALITY.md), including its
+directional-loss interpretation and limitations, before rollout.
 
 ## Per-PBX acceptance checklist
 
@@ -183,7 +173,8 @@ du -sh /var/capture
 - [ ] Prometheus shows both PBX metric targets as healthy.
 - [ ] Alloy sends only approved log paths over a private or authenticated route.
 - [ ] Firewall changes are documented and source-restricted.
-- [ ] Optional RTP capture uses the confirmed interface/range and bounded disk.
+- [ ] RTCP reports appear in the HOMER QoS view under the native HEP capture ID.
+- [ ] The sensor has PCAP writing and disk HEP buffering disabled.
 - [ ] No PBX credential, log, or packet capture was committed to Git.
 
 For synthetic transaction tests, follow

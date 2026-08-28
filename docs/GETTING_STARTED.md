@@ -195,12 +195,14 @@ FreeSWITCH host.
 At minimum:
 
 1. Enable native FreeSWITCH HEP capture to MON01 UDP 9060 for the selected
-   profiles. Current FS PBX systems assign each physical server a capture ID
-   automatically, starting at `101`.
-2. Expose node_exporter TCP 9100 only to MON01/VPN.
-3. Run freeswitch_exporter TCP 9282 beside FreeSWITCH, with ESL kept on
+   profiles. Current FS PBX systems generate and persist a random, nonzero
+   unsigned 32-bit capture ID for each physical server.
+2. Enable Sofia RTCP reports and install the live RTCP quality sensor if HOMER
+   call-quality analysis is required.
+3. Expose node_exporter TCP 9100 only to MON01/VPN.
+4. Run freeswitch_exporter TCP 9282 beside FreeSWITCH, with ESL kept on
    `127.0.0.1:8021`.
-4. Ship selected logs with Grafana Alloy through a private or authenticated
+5. Ship selected logs with Grafana Alloy through a private or authenticated
    route.
 
 Add the PBX to the local Prometheus discovery files:

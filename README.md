@@ -51,7 +51,7 @@ switch production commands to a pinned release once one exists.
 | Blackbox Exporter | HTTP and TCP availability probes |
 | Pushgateway + SIPp | Scheduled synthetic SIP transaction results |
 | node_exporter | MON01 and PBX host metrics |
-| Optional RTP ring capture | PBX-local, bounded packet-header diagnostics |
+| RTCP quality sensor | Directional loss, jitter, and MOS reports in HOMER |
 
 Central services run in Docker Compose on MON01. PBX-side capture and exporters
 remain local to each FreeSWITCH host.
@@ -112,6 +112,7 @@ exact checks.
 - [Architecture, data flows, ports, and persistence](docs/ARCHITECTURE.md)
 - [Operations, upgrades, backups, and troubleshooting](docs/OPERATIONS.md)
 - [Restrict HEP to approved PBX addresses](docs/FIREWALL.md)
+- [Centralized RTP/RTCP quality](docs/RTP_QUALITY.md)
 - [Synthetic SIP checks](docs/SYNTHETIC_SIP.md)
 - [PBX-side agent setup](pbx-agent/README.md)
 - [Alert delivery](alertmanager/README.md)

@@ -1,0 +1,33 @@
+[Unit]
+Description=Live RTCP quality reporter for HOMER
+Documentation=https://github.com/nemerald-voip/fspbx-monitoring
+Wants=network-online.target
+After=network-online.target freeswitch.service
+ConditionPathExists=/etc/heplify-rtcp/heplify.json
+
+[Service]
+Type=simple
+User=heplify
+Group=heplify
+RuntimeDirectory=heplify-rtcp
+RuntimeDirectoryMode=0750
+WorkingDirectory=/run/heplify-rtcp
+ExecStart=/usr/local/sbin/heplify -config /etc/heplify-rtcp/heplify.json
+Restart=on-failure
+RestartSec=5s
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_PACKET
+RestrictRealtime=true
+LockPersonality=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -217,6 +217,23 @@ numeric capture ID.
 
 Do not commit packet captures or leave broad captures running indefinitely.
 
+### RTCP quality is absent from HOMER
+
+The SIP ladder can work while the **QoS** tab remains empty. Confirm that RTCP
+is enabled on each media-carrying Sofia profile, then check the passive sensor:
+
+```bash
+grep -RIn 'rtcp-audio-interval-msec' /etc/freeswitch/sip_profiles
+systemctl status heplify-rtcp.service --no-pager
+journalctl -u heplify-rtcp.service -n 100 --no-pager
+```
+
+Place a call lasting at least 15 seconds. If necessary, make a short authorized
+metadata-only observation for RTCP on the PBX's configured RTP range. Missing
+remote reports can leave PBX-to-remote loss unmeasured even when FreeSWITCH's
+own reports are present. Follow [Centralized RTP/RTCP quality](RTP_QUALITY.md)
+for correlation and direction interpretation.
+
 ## Reboot behavior
 
 No manual command should be required after a normal host reboot:
