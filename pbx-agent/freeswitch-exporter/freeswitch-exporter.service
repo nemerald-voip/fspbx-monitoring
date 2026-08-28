@@ -1,0 +1,19 @@
+[Unit]
+Description=Prometheus FreeSWITCH exporter
+After=network-online.target freeswitch.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/freeswitch-exporter
+ExecStart=/usr/local/bin/freeswitch_exporter --web.listen-address=${LISTEN_ADDRESS} --freeswitch.scrape-uri=${ESL_URI} --freeswitch.password=${ESL_PASSWORD}
+DynamicUser=true
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

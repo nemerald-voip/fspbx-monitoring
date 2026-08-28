@@ -1,0 +1,15 @@
+[Unit]
+Description=FS PBX synthetic SIP OPTIONS check for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fs-monitoring/synthetic-sip-%i.env
+ExecStart=/opt/monitoring/synthetic/sipp-check.sh
+WorkingDirectory=/tmp
+DynamicUser=true
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

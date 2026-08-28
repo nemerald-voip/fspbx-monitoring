@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<scenario name="SIP OPTIONS health check">
+  <send retrans="500">
+    <![CDATA[
+      OPTIONS sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: Monitor <sip:monitor@[local_ip]:[local_port]>;tag=[call_number]
+      To: Service <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: synthetic-[call_id]
+      CSeq: 1 OPTIONS
+      Contact: <sip:monitor@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      User-Agent: FS-PBX-Monitor
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="200" rtd="true" />
+  <ResponseTimeRepartition value="10,20,50,100,150,500,1000" />
+</scenario>

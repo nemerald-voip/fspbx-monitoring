@@ -1,0 +1,16 @@
+[Unit]
+Description=Reconcile the FreeSWITCH monitoring Docker Compose stack at boot
+Requires=docker.service
+Wants=network-online.target
+After=docker.service network-online.target
+ConditionPathExists=/opt/monitoring/compose.yaml
+ConditionPathExists=/opt/monitoring/.env
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/monitoring
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

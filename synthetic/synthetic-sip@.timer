@@ -1,0 +1,12 @@
+[Unit]
+Description=Run FS PBX synthetic SIP check for %i every five minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+RandomizedDelaySec=15s
+Persistent=true
+Unit=synthetic-sip@%i.service
+
+[Install]
+WantedBy=timers.target

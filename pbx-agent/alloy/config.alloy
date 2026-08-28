@@ -1,0 +1,36 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+local.file_match "pbx_logs" {
+  path_targets = [
+    {
+      "__path__" = "/var/log/freeswitch/freeswitch.log",
+      "job"      = "freeswitch",
+      "instance" = sys.env("PBX_NAME"),
+    },
+    {
+      "__path__" = "/var/log/nginx/*.log",
+      "job"      = "nginx",
+      "instance" = sys.env("PBX_NAME"),
+    },
+    {
+      "__path__" = "/var/log/syslog",
+      "job"      = "syslog",
+      "instance" = sys.env("PBX_NAME"),
+    },
+  ]
+}
+
+loki.source.file "pbx_logs" {
+  targets       = local.file_match.pbx_logs.targets
+  forward_to    = [loki.write.mon01.receiver]
+  tail_from_end = true
+}
+
+loki.write "mon01" {
+  endpoint {
+    url = sys.env("LOKI_URL")
+  }
+}

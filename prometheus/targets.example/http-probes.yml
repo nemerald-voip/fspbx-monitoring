@@ -1,0 +1,4 @@
+# Add health URLs that must return 2xx, for example:
+# - targets: [https://pbx1.example.com/health]
+#   labels: {site: west}
+[]

@@ -1,0 +1,4 @@
+# TCP probes only test connection acceptance; SIPp tests a transaction.
+# - targets: [pbx1.example.com:5061]
+#   labels: {site: west}
+[]

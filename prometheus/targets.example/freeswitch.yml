@@ -1,0 +1,5 @@
+# The exporter runs beside FreeSWITCH and connects to ESL on 127.0.0.1.
+# Restrict 9282 to MON01/VPN, then add entries such as:
+# - targets: [pbx1.example.com:9282]
+#   labels: {site: west}
+[]

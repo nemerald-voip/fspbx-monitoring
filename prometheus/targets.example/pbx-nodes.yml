@@ -1,0 +1,4 @@
+# Replace this empty list with private/VPN PBX node_exporter targets, for example:
+# - targets: [pbx1.example.com:9100]
+#   labels: {site: west}
+[]

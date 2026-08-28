@@ -1,0 +1,286 @@
+name: ${COMPOSE_PROJECT_NAME:-fs-monitoring}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  volume-init:
+    image: alpine:3.20
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - |
+        chown -R 1000:1000 /data/homer
+        chown -R 10001:10001 /data/loki
+        chown -R 65534:65534 /data/prometheus
+        chown -R 65534:65534 /data/alertmanager
+        chown -R 472:0 /data/grafana
+        chown -R 65534:65534 /data/pushgateway
+    volumes:
+      - homer_data:/data/homer
+      - loki_data:/data/loki
+      - prometheus_data:/data/prometheus
+      - alertmanager_data:/data/alertmanager
+      - grafana_data:/data/grafana
+      - pushgateway_data:/data/pushgateway
+    restart: "no"
+    logging: *default-logging
+
+  homer:
+    image: ${HOMER_IMAGE:-ghcr.io/sipcapture/homer:11.0.333}
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    environment:
+      HOMER_INGEST_ENABLE: "true"
+      HOMER_INGEST_WORKER_COUNT: ${HOMER_INGEST_WORKERS:-8}
+      HOMER_INGEST_QUEUE_SIZE: "80000"
+      HOMER_INGEST_UDP_ENABLE: "true"
+      HOMER_INGEST_UDP_HOST: 0.0.0.0
+      HOMER_INGEST_UDP_PORT: "9060"
+      HOMER_INGEST_UDP_MULTICORE: "true"
+      HOMER_INGEST_TCP_ENABLE: "true"
+      HOMER_INGEST_TCP_HOST: 0.0.0.0
+      HOMER_INGEST_TCP_PORT: "9060"
+      HOMER_INGEST_TCP_MULTICORE: "true"
+      HOMER_INGEST_HTTP_ENABLE: "true"
+      HOMER_INGEST_HTTP_HOST: 0.0.0.0
+      HOMER_INGEST_HTTP_PORT: "9080"
+      HOMER_INGEST_HEP_HEPV3_ENABLE: "true"
+      HOMER_INGEST_HEP_PROTOBUF_ENABLE: "true"
+      HOMER_STORAGE_ENABLE: "true"
+      HOMER_STORAGE_DUCKLAKE_CATALOG_TYPE: sqlite
+      HOMER_STORAGE_DUCKLAKE_CATALOG_PATH: /data/homer/homer_catalog.sqlite
+      HOMER_STORAGE_DUCKLAKE_DATA_PATH: /data/homer/parquet
+      HOMER_STORAGE_DUCKLAKE_LAKE_NAME: homer_lake
+      HOMER_STORAGE_DUCKLAKE_BATCH_SIZE: "10000"
+      HOMER_STORAGE_DUCKLAKE_FLUSH_INTERVAL_SEC: "30"
+      HOMER_STORAGE_DUCKLAKE_TUNING_MEMORY_LIMIT: ${HOMER_MEMORY_LIMIT:-6GB}
+      HOMER_STORAGE_DUCKLAKE_TUNING_THREADS: ${HOMER_DUCKDB_THREADS:-4}
+      HOMER_STORAGE_DUCKLAKE_TUNING_TEMP_DIRECTORY: /data/homer/.duckdb_spill
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_ENABLE: "true"
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_CHECK_INTERVAL_SEC: "1800"
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_RETENTION_DAYS: ${HOMER_RETENTION_DAYS:-30}
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_SNAPSHOT_EXPIRE_INTERVAL_SEC: "3600"
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_MIN_AGE_SEC: "3600"
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_MAX_FILE_SIZE_BYTES: "134217728"
+      HOMER_STORAGE_DUCKLAKE_COMPACTION_MAX_COMPACTED_FILES: "100"
+      HOMER_NODE_ENABLE: "true"
+      HOMER_NODE_FLIGHT_SERVER_HOST: 127.0.0.1
+      HOMER_NODE_FLIGHT_SERVER_PORT: "50051"
+      HOMER_NODE_FLIGHT_SERVER_AUTH_TOKEN: ${HOMER_FLIGHT_TOKEN:?run scripts/init-secrets.sh first}
+      HOMER_NODE_FLIGHT_SERVER_MAX_MESSAGE_SIZE: "16777216"
+      HOMER_NODE_DUCKLAKE_LAKE_NAME: homer_lake
+      HOMER_NODE_DUCKLAKE_TUNING_THREADS: ${HOMER_DUCKDB_THREADS:-4}
+      HOMER_NODE_DUCKLAKE_TUNING_TEMP_DIRECTORY: /data/homer/.duckdb_spill
+      HOMER_NODE_DUCKLAKE_VOLUMES_0_NAME: local
+      HOMER_NODE_DUCKLAKE_VOLUMES_0_TYPE: local
+      HOMER_NODE_DUCKLAKE_VOLUMES_0_CATALOG_TYPE: sqlite
+      HOMER_NODE_DUCKLAKE_VOLUMES_0_CATALOG_PATH: /data/homer/homer_catalog.sqlite
+      HOMER_NODE_DUCKLAKE_VOLUMES_0_PATH: /data/homer/parquet
+      HOMER_COORDINATOR_ENABLE: "true"
+      HOMER_COORDINATOR_HTTP_SERVER_ENABLE: "true"
+      HOMER_COORDINATOR_HTTP_SERVER_HOST: 0.0.0.0
+      HOMER_COORDINATOR_HTTP_SERVER_PORT: "8080"
+      HOMER_COORDINATOR_HTTP_SERVER_STATIC_PATH: /usr/local/homer-core/dist
+      HOMER_COORDINATOR_NODES_0_NAME: local
+      HOMER_COORDINATOR_NODES_0_HOST: 127.0.0.1
+      HOMER_COORDINATOR_NODES_0_PORT: "50051"
+      HOMER_COORDINATOR_NODES_0_USE_TLS: "false"
+      HOMER_COORDINATOR_NODES_0_TOKEN: ${HOMER_FLIGHT_TOKEN:?run scripts/init-secrets.sh first}
+      HOMER_COORDINATOR_NODES_0_PRIORITY: "1"
+      HOMER_COORDINATOR_SETTINGS_DB_PATH: /data/homer/homer_settings.duckdb
+      HOMER_COORDINATOR_JWT_SECRET: ${HOMER_JWT_SECRET:?run scripts/init-secrets.sh first}
+      HOMER_COORDINATOR_JWT_EXPIRE_HOURS: "12"
+      HOMER_COORDINATOR_AUTH_ADMIN_USER: ${HOMER_ADMIN_USER:-admin}
+      HOMER_COORDINATOR_AUTH_ADMIN_PASSWORD_HASH: ${HOMER_ADMIN_PASSWORD_HASH:?run scripts/init-secrets.sh first}
+      HOMER_LOG_LEVEL: info
+      HOMER_LOG_JSON: "true"
+      HOMER_LOG_OUTPUT_0: stdout
+      HOMER_PROMETHEUS_ENABLE: "true"
+      HOMER_PROMETHEUS_HOST: 0.0.0.0
+      HOMER_PROMETHEUS_PORT: "9090"
+      HOMER_PROMETHEUS_PATH: /metrics
+    volumes:
+      - homer_data:/data/homer
+    ports:
+      - "${HEP_BIND_ADDRESS:-0.0.0.0}:9060:9060/udp"
+      - "${HEP_BIND_ADDRESS:-0.0.0.0}:9060:9060/tcp"
+      - "${UI_BIND_ADDRESS:-127.0.0.1}:${HOMER_UI_PORT:-8080}:8080/tcp"
+    expose:
+      - "9090"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.14.0}
+    user: "65534:65534"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-90d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-40GB}
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/targets:/etc/prometheus/targets:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${UI_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.34.0}
+    user: "65534:65534"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "${UI_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  loki:
+    image: ${LOKI_IMAGE:-grafana/loki:3.7.7}
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    command:
+      - -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/var/loki
+    ports:
+      - "${UI_BIND_ADDRESS:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.0}
+    user: "472:0"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run scripts/init-secrets.sh first}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_COOKIE_SECURE: ${GRAFANA_COOKIE_SECURE:-false}
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_METRICS_ENABLED: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${UI_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.12.1}
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/.+)($|/)
+    volumes:
+      - /:/host:ro,rslave
+    expose:
+      - "9100"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  blackbox-exporter:
+    image: ${BLACKBOX_IMAGE:-prom/blackbox-exporter:v0.28.0}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    expose:
+      - "9115"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+  pushgateway:
+    image: ${PUSHGATEWAY_IMAGE:-prom/pushgateway:v1.11.3}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - --persistence.file=/data/metrics.db
+      - --persistence.interval=5m
+    volumes:
+      - pushgateway_data:/data
+    ports:
+      - "${UI_BIND_ADDRESS:-127.0.0.1}:${PUSHGATEWAY_PORT:-9091}:9091"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    logging: *default-logging
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  homer_data:
+  prometheus_data:
+  alertmanager_data:
+  loki_data:
+  grafana_data:
+  pushgateway_data:
