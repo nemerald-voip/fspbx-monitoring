@@ -109,6 +109,7 @@ exact checks.
 - [Getting started on a new server](docs/GETTING_STARTED.md)
 - [Architecture, data flows, ports, and persistence](docs/ARCHITECTURE.md)
 - [Operations, upgrades, backups, and troubleshooting](docs/OPERATIONS.md)
+- [Restrict HEP to approved PBX addresses](docs/FIREWALL.md)
 - [Synthetic SIP checks](docs/SYNTHETIC_SIP.md)
 - [PBX-side agent setup](pbx-agent/README.md)
 - [Alert delivery](alertmanager/README.md)

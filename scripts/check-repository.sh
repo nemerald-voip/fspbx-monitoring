@@ -4,7 +4,7 @@ set -eu
 project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_dir"
 
-for script in install.sh scripts/*.sh synthetic/*.sh pbx-agent/rtp-capture/*.sh; do
+for script in install.sh scripts/*.sh ops/*.sh synthetic/*.sh pbx-agent/rtp-capture/*.sh; do
   sh -n "$script"
 done
 
@@ -12,7 +12,7 @@ done
 ./scripts/check-docs.sh
 
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck install.sh scripts/*.sh synthetic/*.sh pbx-agent/rtp-capture/*.sh
+  shellcheck install.sh scripts/*.sh ops/*.sh synthetic/*.sh pbx-agent/rtp-capture/*.sh
 fi
 
 command -v docker >/dev/null 2>&1 || {
@@ -27,6 +27,8 @@ grep -q '^Requires=docker.service$' systemd/monitoring-reconcile.service
 grep -q '^ConditionPathExists=/opt/monitoring/.env$' systemd/monitoring-reconcile.service
 grep -q '^ExecStart=/usr/bin/docker compose up -d --remove-orphans$' \
   systemd/monitoring-reconcile.service
+grep -q '^ExecStart=/opt/monitoring/ops/apply-hep-firewall.sh$' \
+  systemd/fspbx-hep-firewall.service
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
     git ls-files --error-unmatch .env >/dev/null 2>&1; then

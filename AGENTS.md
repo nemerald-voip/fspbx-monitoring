@@ -71,6 +71,8 @@ logs and the relevant Prometheus target or UI.
 - `compose.yaml`: complete central service topology and image pins.
 - `.env.example`: safe template, bind defaults, retention, and image versions.
 - `systemd/monitoring-reconcile.service`: boot-time Compose reconciler template.
+- `systemd/fspbx-hep-firewall.service`: optional, explicit HEP allowlist unit.
+- `ops/apply-hep-firewall.sh`: optional Docker iptables IPv4 allowlist helper.
 - `scripts/init-secrets.sh`: creates `.env` once with mode `0600`.
 - `scripts/check-config.sh`: validates the local deployment using `.env`.
 - `scripts/check-repository.sh`: CI-safe repository validation using
@@ -87,6 +89,7 @@ logs and the relevant Prometheus target or UI.
 - `pbx-agent/`: PBX-side FreeSWITCH, exporter, Alloy, and RTP-capture examples.
 - `synthetic/`: SIPp OPTIONS scenario, publisher, and timer/service templates.
 - `docs/SYNTHETIC_SIP.md`: scheduled SIP transaction setup and limitations.
+- `docs/FIREWALL.md`: provider/VPN and Docker-aware HEP restriction examples.
 - `docs/`: operator-facing deployment, architecture, and operations guides.
 - `.github/workflows/`: validation and tag-triggered release workflows.
 
@@ -139,6 +142,8 @@ The following files are intentionally local and must remain ignored:
 - `prometheus/targets/*.yml`
 - `*.pcap` and `*.pcapng`
 - `backups/` and `data/`
+- `/etc/fs-monitoring/hep-firewall.env` (outside Git, when the optional host
+  allowlist is enabled)
 
 Do not infer that `.env` exists or that the stack is running. Inspect first:
 

@@ -63,6 +63,9 @@ VPN, or authenticated TLS reverse proxy.
 traffic to MON01. Restrict UDP/TCP 9060 at the provider firewall, VPN boundary,
 or Docker-aware host firewall.
 
+See [Restrict HEP traffic](FIREWALL.md) for an example allowlist and its IPv6
+and firewall-backend limitations.
+
 Internal exporters communicate only on the Compose bridge network. The central
 node_exporter mounts the host root read-only and uses the host PID namespace so
 Prometheus can observe MON01.

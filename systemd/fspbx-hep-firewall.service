@@ -1,0 +1,17 @@
+[Unit]
+Description=Restrict Docker-published HEP to approved IPv4 PBX sources
+Requires=docker.service
+After=docker.service
+Before=monitoring-reconcile.service
+PartOf=docker.service
+ConditionPathExists=/etc/fs-monitoring/hep-firewall.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fs-monitoring/hep-firewall.env
+ExecStart=/opt/monitoring/ops/apply-hep-firewall.sh
+ExecReload=/opt/monitoring/ops/apply-hep-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

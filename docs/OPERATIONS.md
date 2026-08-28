@@ -281,6 +281,7 @@ Prometheus cardinality, Loki ingestion, and HOMER growth. Default alerts warn at
 
 - Keep the OS, Docker Engine, and pinned images patched deliberately.
 - Audit published ports after configuration changes.
+- Verify the HEP source allowlist using [the firewall guide](FIREWALL.md).
 - Rotate credentials after suspected exposure.
 - Keep `.env` mode `0600`.
 - Keep real target inventory and notification credentials out of Git.

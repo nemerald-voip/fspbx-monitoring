@@ -6,7 +6,8 @@ cd "$project_dir"
 
 for required in README.md AGENTS.md SECURITY.md \
   docs/GETTING_STARTED.md docs/ARCHITECTURE.md docs/OPERATIONS.md \
-  docs/SYNTHETIC_SIP.md pbx-agent/README.md alertmanager/README.md; do
+  docs/FIREWALL.md docs/SYNTHETIC_SIP.md pbx-agent/README.md \
+  alertmanager/README.md; do
   if [ ! -s "$required" ]; then
     echo "Missing or empty documentation file: $required" >&2
     exit 1

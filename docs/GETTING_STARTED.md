@@ -45,7 +45,23 @@ the UIs. A private VPN is preferred. By default:
 Restrict HEP 9060 to known PBX source addresses using the VPS provider firewall,
 a VPN, and/or host rules appropriate for Docker. Review Docker's
 [packet-filtering and firewall guidance](https://docs.docker.com/engine/network/packet-filtering-firewalls/)
-before relying on UFW or firewalld alone.
+before relying on UFW or firewalld alone. Copyable provider/VPN and Docker-aware
+host examples are in [Restrict HEP traffic](FIREWALL.md).
+
+For example, after the repository and Docker are present, allow only one PBX
+IPv4 address on external interface `eth0` with:
+
+```bash
+cd /opt/monitoring
+sudo env \
+  EXTERNAL_INTERFACE=eth0 \
+  ALLOWED_HEP_SOURCES='203.0.113.10/32' \
+  ./ops/apply-hep-firewall.sh
+```
+
+Replace `eth0` and the documentation address before running it. The helper is
+IPv4-only and requires Docker's iptables backend. The full firewall guide covers
+multiple PBXs, persistence, verification, IPv6, nftables, and rollback.
 
 ## 3. Install
 
