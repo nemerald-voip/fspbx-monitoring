@@ -1,9 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# Set this after the GitHub repository is chosen. Until then, remote installs
-# must pass --repo OWNER/REPOSITORY. Local checkout installs need no repository.
-default_repository=""
+default_repository="nemerald-voip/fspbx-monitoring"
 default_version="main"
 
 install_dir=/opt/monitoring

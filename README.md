@@ -124,12 +124,10 @@ must reduce visibility only; it must not interrupt calls, registrations, or RTP.
 
 ## One-command installation
 
-On a new Debian server, run the installer as root. Until this project has a
-GitHub home, specify its eventual `OWNER/REPOSITORY` explicitly:
+On a new Debian server, install the current development branch with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/v1.0.0/install.sh | \
-  sudo sh -s -- --repo OWNER/REPOSITORY --version v1.0.0
+curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/install.sh | sudo sh
 ```
 
 The installer supports Debian 11, 12, and 13 with systemd. It installs Docker CE
@@ -141,16 +139,22 @@ Use `--no-start` to install and configure everything without pulling or starting
 the monitoring containers. Use `--no-secrets --no-start` to leave `.env` absent.
 Run `./install.sh --help` for all options.
 
-For a production deployment, use a version tag rather than `main`. GitHub release
-immutability should be enabled so published tags cannot be moved.
+For a production deployment, use a version tag rather than `main`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/v1.0.0/install.sh | \
+  sudo sh -s -- --version v1.0.0
+```
+
+GitHub release immutability should be enabled so published tags cannot be moved.
 
 ## Updating
 
 Re-run the installer with the desired release tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/v1.1.0/install.sh | \
-  sudo sh -s -- --repo OWNER/REPOSITORY --version v1.1.0
+curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/v1.1.0/install.sh | \
+  sudo sh -s -- --version v1.1.0
 ```
 
 Application data stays in named Docker volumes. The installer preserves `.env`
