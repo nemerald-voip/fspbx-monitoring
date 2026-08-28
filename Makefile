@@ -1,4 +1,4 @@
-.PHONY: init validate validate-repository up down logs ps reload-prometheus
+.PHONY: init validate validate-docs validate-repository up down logs ps reload-prometheus
 
 init:
 	./scripts/init-secrets.sh
@@ -8,6 +8,9 @@ validate:
 
 validate-repository:
 	./scripts/check-repository.sh
+
+validate-docs:
+	./scripts/check-docs.sh
 
 up: validate
 	docker compose up -d

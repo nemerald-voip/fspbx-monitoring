@@ -4,6 +4,21 @@ Install these pieces on every FreeSWITCH host. The monitoring server must never
 be required for normal call processing; HEP, logs, and metrics are best-effort
 outbound telemetry.
 
+Before changing a PBX, complete the central
+[new-server checklist](../docs/GETTING_STARTED.md), choose private/VPN addresses,
+and record these per-node values:
+
+| Value | Requirement |
+|---|---|
+| PBX name | Stable label used consistently in Grafana and Prometheus |
+| HEP capture ID | Unique numeric ID for this PBX |
+| MON01 address | Private/VPN address whenever possible |
+| ESL password | Long random local secret; never stored in this repository |
+| RTP range | Exact range used by this FreeSWITCH configuration |
+
+Apply one telemetry layer at a time and confirm that disabling it does not alter
+call processing.
+
 ## 1. Native HEP capture
 
 Copy the settings from
@@ -79,3 +94,18 @@ systemctl status rtp-capture
 journalctl -u rtp-capture
 du -sh /var/capture
 ```
+
+## Per-PBX acceptance checklist
+
+- [ ] FreeSWITCH continues normal call handling when MON01 is unreachable.
+- [ ] ESL listens only on `127.0.0.1:8021`.
+- [ ] HEP reaches MON01 and appears under the PBX's unique capture ID.
+- [ ] TCP 9100 and 9282 accept connections only from MON01/VPN.
+- [ ] Prometheus shows both PBX metric targets as healthy.
+- [ ] Alloy sends only approved log paths over a private or authenticated route.
+- [ ] Firewall changes are documented and source-restricted.
+- [ ] Optional RTP capture uses the confirmed interface/range and bounded disk.
+- [ ] No PBX credential, log, or packet capture was committed to Git.
+
+For synthetic transaction tests, follow
+[`docs/SYNTHETIC_SIP.md`](../docs/SYNTHETIC_SIP.md) on MON01.

@@ -8,3 +8,6 @@ data/
 # Host-specific discovery targets. Copy the tracked examples from
 # prometheus/targets.example/ during installation.
 prometheus/targets/*.yml
+
+# Optional local Alertmanager routing and credentials.
+alertmanager/alertmanager.local.yml

@@ -9,6 +9,7 @@ for script in install.sh scripts/*.sh synthetic/*.sh pbx-agent/rtp-capture/*.sh;
 done
 
 ./install.sh --help >/dev/null
+./scripts/check-docs.sh
 
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck install.sh scripts/*.sh synthetic/*.sh pbx-agent/rtp-capture/*.sh
