@@ -198,7 +198,7 @@ if [ -z "$source_dir" ]; then
 else
   case "$source_dir" in
     /*) ;;
-    *) source_dir=$(CDPATH= cd -- "$source_dir" && pwd) ;;
+    *) source_dir=$(CDPATH='' cd -- "$source_dir" && pwd) ;;
   esac
 fi
 

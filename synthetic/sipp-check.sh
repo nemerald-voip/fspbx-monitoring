@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -u
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 : "${SIP_TARGET:?Set SIP_TARGET to a hostname or IP}"
 : "${PUSHGATEWAY_URL:=http://127.0.0.1:9091}"
 : "${PBX_NAME:=$SIP_TARGET}"
@@ -42,7 +42,7 @@ sipp "$SIP_TARGET:$SIP_PORT" \
   -s monitor \
   -t "$sipp_transport" \
   -m 1 \
-  -timeout "$(($SIP_TIMEOUT_SECONDS * 1000))" \
+  -timeout "$((SIP_TIMEOUT_SECONDS * 1000))" \
   -nostdin \
   -trace_err
 result=$?
