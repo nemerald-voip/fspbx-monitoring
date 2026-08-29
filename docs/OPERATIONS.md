@@ -336,6 +336,10 @@ Loki retention is configured in `loki/loki.yml`. Watch filesystem free space,
 Prometheus cardinality, Loki ingestion, and HOMER growth. Default alerts warn at
 15% free and become critical at 7% free.
 
+Homer defaults to 14 days of age-based retention. It has no filesystem
+free-space trigger, so size the retention window from measured ingest and keep
+the disk alerts routed to an operator.
+
 ## Security maintenance
 
 - Keep the OS, Docker Engine, and pinned images patched deliberately.

@@ -145,10 +145,10 @@ Named Docker volumes hold all central state. Default retention and sizing:
 
 | Data | Default retention/limit | Planning allocation on a 300 GB host |
 |---|---:|---:|
-| HOMER SIP | 30 days | approximately 140 GB |
+| HOMER SIP | 14 days | approximately 70 GB |
 | Loki logs | 14 days | approximately 70 GB |
 | Prometheus | 90 days and 40 GB maximum | approximately 40 GB |
-| OS, Docker, reserve | n/a | approximately 50 GB |
+| OS, Docker, and reserve | n/a | approximately 120 GB |
 
 Actual ingest depends on call volume, traffic duplication, and log verbosity.
 Review usage after the first week. Docker container logs rotate at 20 MB with

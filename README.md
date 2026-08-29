@@ -159,10 +159,10 @@ Validate a configured deployment:
 
 | Data | Default | Suggested share of a 300 GB host |
 |---|---:|---:|
-| HOMER SIP | 30 days | about 140 GB |
+| HOMER SIP | 14 days | about 70 GB |
 | Loki logs | 14 days | about 70 GB |
 | Prometheus metrics | 90 days, maximum 40 GB | about 40 GB |
-| OS, Docker, reserve | n/a | about 50 GB |
+| OS, Docker, and reserve | n/a | about 120 GB |
 
 Review actual ingest after the first week. Alerts warn below 15% filesystem free
 and become critical below 7%.
