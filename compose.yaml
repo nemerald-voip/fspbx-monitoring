@@ -112,6 +112,8 @@ services:
       HOMER_COORDINATOR_CORRELATION_ENABLE: "true"
       HOMER_COORDINATOR_CORRELATION_SEED_DEFAULT: "true"
       HOMER_COORDINATOR_HTTP_SERVER_ENABLE: "true"
+      HOMER_INGEST_SIP_ALEG_IDS_0: X-CID
+      HOMER_INGEST_SIP_FORCE_ALEG_ID: "false"
     volumes:
       - homer_data:/data/homer
     ports:
