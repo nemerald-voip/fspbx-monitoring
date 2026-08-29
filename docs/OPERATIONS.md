@@ -220,25 +220,27 @@ Do not commit packet captures or leave broad captures running indefinitely.
 ### RTCP quality is absent from HOMER
 
 The SIP ladder can work while the **QoS** tab remains empty. Confirm that RTCP
-is enabled on each media-carrying Sofia profile, then check the passive sensor:
+is enabled and RTCP events are requested on each applicable call path, then
+check the local ESL reporter:
 
 ```bash
 grep -RIn 'rtcp-audio-interval-msec' /etc/freeswitch/sip_profiles
-systemctl status heplify-rtcp.service --no-pager
-journalctl -u heplify-rtcp.service -n 100 --no-pager
+grep -RIn 'fire_rtcp_events' /etc/freeswitch/dialplan
+systemctl status freeswitch-rtcp-to-hep.service --no-pager
+journalctl -u freeswitch-rtcp-to-hep.service -n 100 --no-pager
 ```
 
-The service deliberately fails startup unless the current invocation confirms
-both per-socket kernel BPF filters. A `Failed to set BPF filter` message or fewer
-than two `BPF filter applied` messages is a hard failure; do not bypass the
-post-start verifier. Check that rendered `bpf_filter` values contain separate
-Sofia and RTCP ranges before retrying.
+The journal should confirm a connection to `127.0.0.1:8021`. Authentication
+errors mean the root-only service credential no longer matches FreeSWITCH.
+Never solve that by exposing ESL remotely; rerun the installer with a protected
+one-line password file.
 
-Place a call lasting at least 15 seconds. If necessary, make a short authorized
-metadata-only observation for RTCP on the PBX's configured RTP range. Missing
-remote reports can leave PBX-to-remote loss unmeasured even when FreeSWITCH's
-own reports are present. Follow [Centralized RTP/RTCP quality](RTP_QUALITY.md)
-for correlation and direction interpretation.
+Place a call lasting at least 15 seconds. Missing remote reports can leave
+PBX-to-remote loss unmeasured even when FreeSWITCH's own reports are present.
+Missing `SEND_RTCP_MESSAGE` events point to `fire_rtcp_events` not being set
+before media activation. Follow
+[Centralized RTP/RTCP quality](RTP_QUALITY.md) for SRTCP handling, correlation,
+and direction interpretation.
 
 ## Reboot behavior
 

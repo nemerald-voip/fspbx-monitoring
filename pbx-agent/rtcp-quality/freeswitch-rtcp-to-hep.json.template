@@ -1,0 +1,9 @@
+{
+  "esl_host": "127.0.0.1",
+  "esl_port": 8021,
+  "hep_host": "@@MONITORING_HOST@@",
+  "hep_port": 9060,
+  "hep_transport": "@@HEP_TRANSPORT@@",
+  "capture_id": @@CAPTURE_ID@@,
+  "node_name": "@@NODE_NAME@@"
+}

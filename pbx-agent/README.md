@@ -152,17 +152,22 @@ Enable `rtcp-audio-interval-msec=5000` through the FS PBX Sofia profile editor
 on every profile that carries media. Applying a profile change can affect calls
 and registrations, so follow the platform's maintenance procedure.
 
+Set and export `fire_rtcp_events=true` early in the applicable dialplan, before
+media starts, so FreeSWITCH publishes its own receiver reports for both call
+legs. Use the PBX's managed dialplan editor so regeneration preserves it.
+
 Then install the live sensor on each physical PBX:
 
 ```bash
 sudo ./rtcp-quality/install.sh --monitoring-ip MON01_IP
 ```
 
-The sensor uses SIP/SDP in memory to correlate RTCP but does not forward SIP,
-RTP payloads, or packet captures. Decoded RTCP reports go to HOMER over the same
-HEP 9060 allowlist and populate the transaction **QoS** view. Read the complete
+The reporter reads parsed RTCP events from loopback-only ESL. FreeSWITCH has
+already authenticated and decrypted SRTCP, so no SRTP keys or media payloads
+leave the process. Reports go to HOMER over the same HEP 9060 allowlist and
+populate the transaction **QoS** view. Read the complete
 [centralized RTP/RTCP procedure](../docs/RTP_QUALITY.md), including its
-directional-loss interpretation, fail-closed BPF checks, resource limits, and
+directional-loss interpretation, ESL credential handling, resource limits, and
 RTCP-off/RTCP-on media canary before rollout.
 
 ## Per-PBX acceptance checklist
@@ -175,9 +180,9 @@ RTCP-off/RTCP-on media canary before rollout.
 - [ ] Alloy sends only approved log paths over a private or authenticated route.
 - [ ] Firewall changes are documented and source-restricted.
 - [ ] RTCP reports appear in the HOMER QoS view under the native HEP capture ID.
-- [ ] Both kernel BPF filters were confirmed for the current service invocation.
+- [ ] The RTCP reporter connects only to loopback ESL and has no capabilities.
 - [ ] The RTCP media canary passed before enabling additional PBXs.
-- [ ] The sensor has PCAP writing and disk HEP buffering disabled.
+- [ ] The reporter's actual RSS/CPU remain comfortably below its limits.
 - [ ] No PBX credential, log, or packet capture was committed to Git.
 
 For synthetic transaction tests, follow

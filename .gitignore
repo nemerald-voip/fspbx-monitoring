@@ -4,6 +4,8 @@
 *.pcapng
 backups/
 data/
+__pycache__/
+*.pyc
 
 # Host-specific discovery targets. Copy the tracked examples from
 # prometheus/targets.example/ during installation.

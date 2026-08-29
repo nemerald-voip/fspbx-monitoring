@@ -11,6 +11,7 @@ done
 
 ./install.sh --help >/dev/null
 ./pbx-agent/rtcp-quality/install.sh --help >/dev/null
+python3 pbx-agent/rtcp-quality/test_freeswitch_rtcp_to_hep.py
 ./scripts/check-docs.sh
 
 if command -v shellcheck >/dev/null 2>&1; then
@@ -31,21 +32,26 @@ grep -q '^ExecStart=/usr/bin/docker compose up -d --remove-orphans$' \
   systemd/monitoring-reconcile.service
 grep -q '^ExecStart=/opt/monitoring/ops/apply-hep-firewall.sh$' \
   systemd/fspbx-hep-firewall.service
-grep -q '^ExecStart=/usr/local/sbin/heplify -config /etc/heplify-rtcp/heplify.json$' \
-  pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '^ExecStartPost=+/usr/local/libexec/verify-heplify-rtcp-bpf$' \
-  pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '^CPUWeight=10$' pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '^MemoryMax=512M$' pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '^MemorySwapMax=0$' pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '^TasksMax=128$' pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '^OOMScoreAdjust=500$' pbx-agent/rtcp-quality/heplify-rtcp.service
-grep -q '"bpf_filter": ".*portrange @@SIP_START@@-@@SIP_END@@' \
-  pbx-agent/rtcp-quality/heplify.json.template
-grep -q '"bpf_filter": "ip and udp and portrange @@RTP_START@@-@@RTP_END@@' \
-  pbx-agent/rtcp-quality/heplify.json.template
-grep -q '"write_file": ""' pbx-agent/rtcp-quality/heplify.json.template
-grep -q '"enable": false' pbx-agent/rtcp-quality/heplify.json.template
+rtcp_unit=pbx-agent/rtcp-quality/freeswitch-rtcp-to-hep.service
+grep -q '^ExecStart=/usr/bin/python3 /usr/local/sbin/freeswitch-rtcp-to-hep --config /etc/freeswitch-rtcp-to-hep/config.json$' \
+  "$rtcp_unit"
+grep -q '^DynamicUser=true$' "$rtcp_unit"
+grep -q '^LoadCredential=esl_password:/etc/freeswitch-rtcp-to-hep/esl-password$' \
+  "$rtcp_unit"
+grep -q '^CPUWeight=10$' "$rtcp_unit"
+grep -q '^MemoryMax=96M$' "$rtcp_unit"
+grep -q '^MemorySwapMax=0$' "$rtcp_unit"
+grep -q '^TasksMax=16$' "$rtcp_unit"
+grep -q '^OOMScoreAdjust=500$' "$rtcp_unit"
+grep -q '^CapabilityBoundingSet=$' "$rtcp_unit"
+grep -q '^RestrictAddressFamilies=AF_INET AF_INET6$' "$rtcp_unit"
+grep -q '"esl_host": "127.0.0.1"' \
+  pbx-agent/rtcp-quality/freeswitch-rtcp-to-hep.json.template
+grep -q '"hep_host": "@@MONITORING_HOST@@"' \
+  pbx-agent/rtcp-quality/freeswitch-rtcp-to-hep.json.template
+test ! -e pbx-agent/rtcp-quality/heplify-rtcp.service
+test ! -e pbx-agent/rtcp-quality/heplify.json.template
+test ! -e pbx-agent/rtcp-quality/verify-bpf.sh
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
     git ls-files --error-unmatch .env >/dev/null 2>&1; then

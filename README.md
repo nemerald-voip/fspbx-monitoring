@@ -51,7 +51,7 @@ switch production commands to a pinned release once one exists.
 | Blackbox Exporter | HTTP and TCP availability probes |
 | Pushgateway + SIPp | Scheduled synthetic SIP transaction results |
 | node_exporter | MON01 and PBX host metrics |
-| RTCP quality sensor | Directional loss, jitter, and MOS reports in HOMER |
+| ESL RTCP reporter | FreeSWITCH-parsed loss, jitter, and MOS inputs in HOMER |
 
 Central services run in Docker Compose on MON01. PBX-side capture and exporters
 remain local to each FreeSWITCH host.

@@ -197,8 +197,9 @@ At minimum:
 1. Enable native FreeSWITCH HEP capture to MON01 UDP 9060 for the selected
    profiles. Current FS PBX systems generate and persist a random, nonzero
    unsigned 32-bit capture ID for each physical server.
-2. Enable Sofia RTCP reports and install the live RTCP quality sensor if HOMER
-   call-quality analysis is required.
+2. Enable Sofia RTCP reports, export `fire_rtcp_events=true` before media, and
+   install the local ESL RTCP reporter if HOMER call-quality analysis is
+   required.
 3. Expose node_exporter TCP 9100 only to MON01/VPN.
 4. Run freeswitch_exporter TCP 9282 beside FreeSWITCH, with ESL kept on
    `127.0.0.1:8021`.

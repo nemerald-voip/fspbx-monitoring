@@ -1,12 +1,26 @@
 # Centralized RTP/RTCP quality
 
-This procedure sends live, decoded RTCP quality reports from each FreeSWITCH
-host to HOMER on MON01. It does not forward RTP audio, create packet captures,
-or keep a disk buffer on the PBX. HOMER stores the reports in its existing
-named volume and correlates them to SIP Call-IDs for the transaction **QoS** tab.
+This procedure sends FreeSWITCH's parsed RTCP quality events to HOMER on MON01.
+The PBX-side reporter connects to the local Event Socket Layer (ESL), converts
+`RECV_RTCP_MESSAGE` and `SEND_RTCP_MESSAGE` events to HEP type 5 JSON, and
+correlates them to the SIP Call-ID for HOMER's transaction **QoS** tab.
 
-The sensor is passive and outside the call path. If the sensor or MON01 fails,
-quality history is incomplete but calls continue normally.
+The reporter does not capture packets, inspect RTP audio, retain media, or read
+SRTP keys. It is outside the call path: if the reporter or MON01 fails, quality
+history is incomplete but calls continue normally.
+
+## Why ESL handles SRTCP safely
+
+An interface capture sees SRTCP headers but cannot trust the encrypted report
+blocks without the session keys. FreeSWITCH already owns those keys because it
+terminates the secure media leg. It authenticates and decrypts received SRTCP,
+parses the RTCP report, and then publishes the resulting fields as a
+`RECV_RTCP_MESSAGE` event. PBX-generated `SEND_RTCP_MESSAGE` events are created
+from FreeSWITCH's own receiver statistics before wire encryption.
+
+This avoids exporting keys and prevents encrypted bytes from being interpreted
+as loss, jitter, or MOS inputs. It applies only when FreeSWITCH is in the media
+path. Bypass-media calls remain unobservable from this reporter.
 
 ## What the reports can prove
 
@@ -16,49 +30,42 @@ A FreeSWITCH bridge has two call legs and two media directions on each leg:
 caller/phone <-- A leg --> FreeSWITCH <-- B leg --> carrier/destination
 ```
 
-RTCP is receiver-reported evidence. The source address of an RTCP report tells
-you which endpoint made the measurement; its report block describes packets
-that endpoint received.
+RTCP is receiver-reported evidence. A report block describes packets received
+by the endpoint that generated the report.
 
 | RTCP reporter | Loss applies to | Likely problem path |
 |---|---|---|
 | FreeSWITCH/PBX | Media received by FreeSWITCH | remote endpoint/carrier → PBX |
 | Remote phone or carrier | Media received by that remote | PBX → remote endpoint/carrier |
 
-Use the SIP ladder and the RTCP source/destination addresses to identify the A
-or B leg. Compare reports from both ends, host interface counters, other calls
-using the same carrier, and provider evidence. A report localizes the affected
-direction and path; it does not alone prove which network owner caused loss.
+Use the SIP ladder and report addresses to identify the A or B leg. Compare
+both legs, host interface counters, other calls using the same carrier, and
+provider evidence. A report localizes a direction; it does not by itself prove
+which network owner caused the loss.
 
-Not every endpoint sends RTCP receiver reports. When only FreeSWITCH reports,
-you can measure traffic arriving at the PBX but cannot directly measure what the
-remote endpoint received from it. Encrypted SRTCP, bypass-media calls, missing
-or incorrect SDP addresses, and NAT rewriting can also limit correlation.
+Not every endpoint sends receiver reports. When only FreeSWITCH reports are
+available, remote-to-PBX media is measured but PBX-to-remote delivery is not.
+Missing peer reports, bypass media, and missing media variables can leave a
+direction absent or reduce address detail.
 
-## Design
+## Design and resource profile
 
-The pinned heplify sensor uses two live capture sockets on the PBX:
+The reporter subscribes only to RTCP and the small set of channel lifecycle
+events needed to map FreeSWITCH UUIDs and media addresses to SIP Call-IDs. It
+uses Python's standard library and one local TCP connection to
+`127.0.0.1:8021`; there are no npm packages, packet sockets, disk queues, or
+background workers.
 
-1. `sip-correlation-only` reads SIP/SDP and builds the in-memory RTP/Call-ID
-   map. It has no configured HEP transport, so native FreeSWITCH HEP remains the
-   only SIP copy sent to HOMER. Native capture continues to cover SIP over TLS.
-2. `rtcp-to-homer` reads only RTCP packets, converts them to HEP protocol type
-   5 JSON, attaches the correlated Call-ID, and sends them to MON01 port 9060.
+The systemd unit uses a dynamic unprivileged identity, an empty capability
+bounding set, a 48 MiB soft memory threshold, 96 MiB hard limit, no swap, a
+16-task limit, low CPU weight, and `OOMScoreAdjust=500`. These are ceilings, not
+measured steady-state consumption. Confirm actual RSS and CPU on the canary PBX
+before cluster rollout.
 
-Each socket has its own explicit kernel `bpf_filter`. The SIP socket can receive
-only the configured Sofia port range. The RTCP socket requires an IPv4 UDP
-packet in the configured RTP range with RTP version 2 and an RTCP packet type
-from 200 through 223; ordinary RTP does not reach its userspace decoder.
-An `ExecStartPost` check requires two `BPF filter applied` journal messages from
-the current systemd invocation. A compilation or installation failure makes the
-unit fail instead of continuing unfiltered.
-
-The service disables PCAP output, disk HEP buffering, its HTTP API, and its
-Prometheus listener. It logs operational messages only to the systemd journal.
-The same unique capture ID used by native FreeSWITCH HEP is reused for RTCP.
-It runs at low CPU weight with a 384 MiB soft memory threshold, 512 MiB hard
-limit, no swap allowance, 128-task limit, and `OOMScoreAdjust=500`, so the
-monitoring sensor yields resources before call processing under pressure.
+The ESL password is copied to a root-only file and passed with systemd's
+credential mechanism. The non-secret JSON configuration fixes ESL to loopback;
+the reporter rejects a non-loopback ESL address. HEP still leaves the PBX for
+MON01 on the existing source-restricted port 9060 path.
 
 ## 1. Confirm prerequisites on the test PBX
 
@@ -67,107 +74,117 @@ Run:
 ```bash
 fs_cli -x 'switchname'
 fs_cli -x 'global_getvar hep_capture_id'
-fs_cli -x 'sofia status' | grep -E 'profile.*RUNNING'
-grep -nE 'rtp-(start|end)-port' \
-  /etc/freeswitch/autoload_configs/switch.conf.xml
-ip route get 212.56.38.50
+ss -lnt | grep '127.0.0.1:8021'
+grep -n 'listen-ip' /etc/freeswitch/autoload_configs/event_socket.conf.xml
 ```
 
-The capture ID must be a nonzero unsigned 32-bit integer and must match this
-physical PBX's native HEP ID. The test host shown in this deployment uses the
-FreeSWITCH default RTP range `16384-32768` because both settings are commented.
+The capture ID must be a nonzero unsigned 32-bit integer and match this PBX's
+native HEP ID. ESL must listen on `127.0.0.1:8021`, never a public or provider
+interface.
 
 MON01's provider and Docker-aware host firewalls must allow this PBX source IP
-to UDP 9060. The installer does not change either firewall. Follow
-[the HEP allowlist procedure](FIREWALL.md) before starting a new PBX sensor.
+to UDP 9060. TCP is optional. The installer does not change either firewall;
+follow [the HEP allowlist procedure](FIREWALL.md).
 
-## 2. Enable RTCP on the Sofia profiles
+## 2. Enable RTCP and FreeSWITCH events
 
-On current FS PBX systems, add this setting through the FS PBX Sofia profile
-editor for every profile that carries media:
+For every Sofia profile that carries media, add this setting through the FS PBX
+profile editor:
 
 ```xml
 <param name="rtcp-audio-interval-msec" value="5000"/>
 ```
 
-Use the UI-managed setting so regeneration does not erase it. Apply the FS PBX
-change procedure to each physical server separately. A Sofia profile restart
-can affect active calls and registrations, so schedule it in a maintenance
-window; the sensor installer itself never restarts FreeSWITCH.
+Then set this channel variable early in the applicable dialplan, before media
+is activated, and export it to the channel's originated leg:
 
-Verify the generated configuration after the UI change:
+```xml
+<action application="export" data="fire_rtcp_events=true"/>
+```
+
+The RTCP interval makes FreeSWITCH send receiver reports. Received peer reports
+produce `RECV_RTCP_MESSAGE`; `fire_rtcp_events=true` additionally publishes the
+PBX-generated report as `SEND_RTCP_MESSAGE`. Apply both settings to every call
+leg whose two directions need reporting.
+
+Use UI-managed settings so regeneration does not erase them. A Sofia profile
+restart can affect active calls and registrations, so schedule it in a
+maintenance window. The reporter installer never restarts FreeSWITCH.
+
+Verify the generated configuration:
 
 ```bash
 grep -RIn 'rtcp-audio-interval-msec' /etc/freeswitch/sip_profiles
+grep -RIn 'fire_rtcp_events' /etc/freeswitch/dialplan
 ```
 
-The value causes FreeSWITCH to send RTCP at a five-second interval and to
-produce receiver reports for media it receives. Remote-side measurements still
-depend on the phone, SBC, or carrier sending its own RTCP reports.
-
-## 3. Install the sensor
-
-After this repository change is pushed, the test server can auto-detect its
-interface, switch name, capture ID, running Sofia port range, and RTP defaults:
+During a test call, use `show channels` to obtain each UUID and confirm the
+variable is true:
 
 ```bash
-curl -fsSL \
-  https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/pbx-agent/rtcp-quality/install.sh | \
-  sudo sh -s -- --monitoring-ip 212.56.38.50
+fs_cli -x 'show channels'
+fs_cli -x 'uuid_getvar CALL_UUID fire_rtcp_events'
 ```
 
-For production, download and review the installer first and use a release tag
-once one exists:
+## 3. Back up and install
+
+The existing packet-capture sensor can be restored without changing HOMER
+data. Before replacing it, preserve its local configuration if present:
 
 ```bash
-curl -fsSLo /tmp/install-heplify-rtcp.sh \
+sudo install -d -m 0700 /root/rtcp-sensor-backup
+sudo cp -a /etc/heplify-rtcp /root/rtcp-sensor-backup/ 2>/dev/null || true
+sudo cp -a /etc/systemd/system/heplify-rtcp.service \
+  /root/rtcp-sensor-backup/ 2>/dev/null || true
+```
+
+Download and review the installer, then use a release tag for production when
+one exists:
+
+```bash
+curl -fsSLo /tmp/install-freeswitch-rtcp-to-hep.sh \
   https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/pbx-agent/rtcp-quality/install.sh
-less /tmp/install-heplify-rtcp.sh
-sudo sh /tmp/install-heplify-rtcp.sh --monitoring-ip 212.56.38.50
+less /tmp/install-freeswitch-rtcp-to-hep.sh
+sudo sh /tmp/install-freeswitch-rtcp-to-hep.sh \
+  --monitoring-ip 212.56.38.50
 ```
 
-Override auto-detection when necessary. For the port layout shown on `tx01`:
+The installer detects the switch name, native HEP capture ID, and ESL password.
+If the password uses an unsupported generated configuration layout, provide a
+root-readable one-line file instead of putting the secret on the command line:
 
 ```bash
-sudo sh /tmp/install-heplify-rtcp.sh \
+sudo sh /tmp/install-freeswitch-rtcp-to-hep.sh \
   --monitoring-ip 212.56.38.50 \
-  --interface eth0 \
   --node-name tx01 \
   --capture-id 3732434656 \
-  --sip-start 35000 --sip-end 36005 \
-  --rtp-start 16384 --rtp-end 32768
+  --esl-password-file /root/esl-password
 ```
 
-The installer downloads heplify `2.0.27` for amd64 or arm64, verifies the
-release SHA-256 digest, installs a least-privilege systemd service, renders
-`/etc/heplify-rtcp/heplify.json`, and enables the service after reboot. It does
-not install `dumpcap`, write under `/var/capture`, or modify FreeSWITCH.
+The installer renders `/etc/freeswitch-rtcp-to-hep/config.json`, stores the ESL
+credential as `/etc/freeswitch-rtcp-to-hep/esl-password` with mode `0600`, and
+enables `freeswitch-rtcp-to-hep.service`. During an upgrade it stops the old
+`heplify-rtcp.service`; if the new unit fails to start, it attempts to restart
+the old unit. It leaves the old binary and configuration in place for rollback.
 
-## 4. Verify live reporting
+## 4. Verify live reporting and load
 
 Check the PBX:
 
 ```bash
-systemctl is-enabled heplify-rtcp.service
-systemctl is-active heplify-rtcp.service
-systemctl status heplify-rtcp.service --no-pager
-journalctl -u heplify-rtcp.service -n 100 --no-pager
-grep -E '"(write_file|enable)"' /etc/heplify-rtcp/heplify.json
-systemctl show heplify-rtcp.service \
-  -p CPUWeight -p MemoryHigh -p MemoryMax -p MemorySwapMax \
-  -p TasksMax -p OOMScoreAdjust
+systemctl is-enabled freeswitch-rtcp-to-hep.service
+systemctl is-active freeswitch-rtcp-to-hep.service
+systemctl status freeswitch-rtcp-to-hep.service --no-pager
+journalctl -u freeswitch-rtcp-to-hep.service -n 100 --no-pager
+systemctl show freeswitch-rtcp-to-hep.service \
+  -p DynamicUser -p CPUWeight -p MemoryCurrent -p MemoryPeak \
+  -p MemoryHigh -p MemoryMax -p MemorySwapMax -p TasksCurrent -p TasksMax \
+  -p OOMScoreAdjust
 ```
 
-The journal must contain both the helper confirmation and two upstream filter
-messages:
-
-```bash
-journalctl -u heplify-rtcp.service -b --no-pager | \
-  grep -E 'BPF filter applied|verified both heplify kernel BPF filters|Failed to set BPF'
-```
-
-Place a test call lasting at least 15 seconds. Confirm outbound HEP without
-printing SIP or media payloads:
+The journal should say it connected to local ESL and subscribed to RTCP events.
+It never logs event payloads or the ESL password. Place a test call lasting at
+least 15 seconds, then confirm outbound HEP metadata without printing media:
 
 ```bash
 sudo tcpdump -n -q -i any \
@@ -178,48 +195,21 @@ In HOMER:
 
 1. Find the test call and open its transaction.
 2. Open **QoS** and look for correlated RTCP reports.
-3. Inspect each report's source and destination IP before interpreting loss.
-4. Compare reports on both call legs and both directions when present.
+3. Inspect report direction before interpreting loss or jitter.
+4. Confirm phone-facing SRTCP reports produce plausible values rather than the
+   arbitrary values seen when encrypted report blocks are decoded as plaintext.
 
-Native SIP capture and the RTCP sensor intentionally share a capture ID. There
-should not be a second copy of each SIP message from heplify.
+Native SIP capture and this reporter intentionally share a capture ID. The
+reporter sends HEP type 5 only, so it cannot duplicate SIP messages.
 
 ## 5. Canary-test FreeSWITCH RTCP audio behavior
 
-Before enabling RTCP across a cluster, run a controlled A/B test on one
-non-production call path. An open FreeSWITCH 1.10.3 report described periodic
-PCMA silence and marker/timestamp anomalies aligned with the configured RTCP
-interval. It is not evidence that FreeSWITCH 1.11.1 has the same behavior, but
-the failure would be media-affecting and warrants a canary.
+The completed A/B canary found no repeating marker packets, sequence loss, or
+RTCP-aligned timestamp discontinuities when RTCP was enabled. Retain the helper
+for a clean final pair or future FreeSWITCH upgrades.
 
-Use the same caller, destination, carrier, codec, and approximately 45-second
-continuous tone or speech sample for both calls. A continuous tone makes a
-five-second cadence easier to hear. Record at the remote endpoint when possible
-so the observation includes what actually left the PBX.
-
-### Baseline with RTCP disabled
-
-Before adding `rtcp-audio-interval-msec`, capture one call in RAM-backed
-`/run`. The helper is installed with the sensor templates but does not run
-automatically:
-
-```bash
-sudo /usr/local/sbin/rtcp-canary-capture \
-  --interface eth0 \
-  --rtp-start 16384 --rtp-end 32768 \
-  --duration 60 \
-  --output /run/rtcp-canary-off.pcap
-```
-
-The command stops after 60 seconds or 25,000 packets and retains at most 256
-bytes per frame. That is enough to include common G.711 payloads, so the file is
-sensitive even though it is temporary. `/run` does not survive reboot.
-
-### Repeat with RTCP enabled
-
-Enable the five-second RTCP setting on only the Sofia profile used by the test
-route, apply it during a maintenance window, and verify the generated profile.
-Then make the otherwise identical call:
+Capture only controlled calls. The helper writes a bounded, sensitive capture
+under RAM-backed `/run` and never runs automatically:
 
 ```bash
 sudo /usr/local/sbin/rtcp-canary-capture \
@@ -229,73 +219,71 @@ sudo /usr/local/sbin/rtcp-canary-capture \
   --output /run/rtcp-canary-on.pcap
 ```
 
-Do not run both captures at once. Keep other calls off the test PBX if possible
-so the comparison contains only the canary.
-
-### Compare the two calls
-
-Copy the two files over SSH to an authorized workstation and open them in
-Wireshark. If Wireshark does not infer RTP, select one stream and use
-**Analyze → Decode As… → RTP**. For each capture:
-
-1. Open **Telephony → RTP → RTP Streams**, select each direction, and choose
-   **Analyze**.
-2. Compare sequence errors, timestamp progression, marker counts, jitter, and
-   lost packets between RTCP-off and RTCP-on calls.
-3. Use display filter `rtp.marker == 1` and check for a new repeating pair of
-   marker packets every five seconds.
-4. Inspect packets around each `rtcp` packet. A reproduction resembles the
-   reported pattern: normal incoming media, followed by PBX-originated marker
-   packets and a silence payload with an abnormal timestamp at the RTCP cadence.
-5. Compare the remote recording for new clicks, gaps, or silence at the same
-   cadence.
-
-Pass the canary only when the RTCP-on call has no new audible cadence, marker
-pair, inserted silence packet, or timestamp discontinuity relative to the
-baseline. If the anomaly appears only on packets leaving FreeSWITCH while the
-corresponding inbound stream remains continuous, stop rollout and preserve the
-small captures for a FreeSWITCH defect report.
-
-After recording the result, delete both sensitive captures from the PBX and
-the workstation:
+It stops after 60 seconds or 25,000 packets and retains at most 256 bytes per
+frame. Delete it immediately after authorized analysis:
 
 ```bash
-sudo rm -- /run/rtcp-canary-off.pcap /run/rtcp-canary-on.pcap
+sudo rm -- /run/rtcp-canary-on.pcap
 ```
+
+For future A/B tests, use the same caller, destination, carrier, codec, and
+continuous audio. Compare RTP sequence errors, timestamp progression, markers,
+jitter, loss, and remote recordings between RTCP-off and RTCP-on calls. Stop a
+rollout if a new audible or packet-level defect follows the RTCP cadence.
 
 ## 6. Cluster rollout
 
-Install and verify one test server first. Then repeat on every physical server:
+Install and verify one test server first. Then repeat on every physical PBX:
 
 1. Confirm its unique live `hep_capture_id`.
-2. Confirm its interface, Sofia ports, and RTP range independently.
-3. Enable RTCP on that node's active Sofia profiles.
-4. Ensure MON01 allows that node's source IP to HEP 9060.
-5. Run the installer locally and place a test call through that node.
+2. Confirm ESL is loopback-only and the password source is local and protected.
+3. Enable RTCP and `fire_rtcp_events` on the required legs.
+4. Ensure MON01 allows that PBX source IP to HEP 9060.
+5. Install the reporter and place a test call through that node.
+6. Record actual service RSS/CPU and verify call processing is unchanged.
 
-Each sensor is independent. No local capture state is replicated between
-redundant PBXs, and loss of one sensor does not affect the other node or calls.
+Each reporter is independent. No local state is replicated, and loss of one
+reporter does not affect the other node or calls.
 
-## Troubleshooting
+## Troubleshooting and rollback
 
-No QoS rows usually means no RTCP is present or it could not be correlated.
-Check in this order:
+If QoS is empty, check in this order:
 
 ```bash
 grep -RIn 'rtcp-audio-interval-msec' /etc/freeswitch/sip_profiles
-sudo tcpdump -n -q -i eth0 'udp portrange 16384-32768'
-journalctl -u heplify-rtcp.service --since '10 minutes ago' --no-pager
+grep -RIn 'fire_rtcp_events' /etc/freeswitch/dialplan
+ss -lnt | grep '127.0.0.1:8021'
+journalctl -u freeswitch-rtcp-to-hep.service --since '10 minutes ago' --no-pager
 ```
 
-If RTP is visible but RTCP is not, confirm the active Sofia profiles loaded the
-RTCP interval and that the peer supports RTCP. If RTCP is visible but HOMER has
-no QoS row, confirm the sensor also sees the unencrypted SIP/SDP for that leg,
-the SDP contains usable media addresses, and HEP reaches MON01.
+An ESL authentication error means the root-only credential does not match
+`event_socket.conf.xml`. A connected reporter with no RTCP events usually means
+RTCP is not active on that leg or no peer report arrived. `RECV_RTCP_MESSAGE`
+can still cover peer-generated reports without `fire_rtcp_events`; missing
+`SEND_RTCP_MESSAGE` specifically points to the channel variable or its timing.
 
-Stop the sensor without affecting FreeSWITCH:
+Stop the reporter without affecting FreeSWITCH:
 
 ```bash
-sudo systemctl disable --now heplify-rtcp.service
+sudo systemctl disable --now freeswitch-rtcp-to-hep.service
 ```
 
-This stops new quality telemetry only; it does not delete HOMER history.
+To roll back temporarily, stop the ESL reporter and re-enable the preserved
+packet sensor:
+
+```bash
+sudo systemctl disable --now freeswitch-rtcp-to-hep.service
+sudo systemctl enable --now heplify-rtcp.service
+```
+
+The old sensor cannot decode SRTCP report bodies and should not be used for
+phone-facing secure legs. Neither stop nor rollback command deletes HOMER
+history.
+
+## Implementation references
+
+- [FreeSWITCH authenticates/decrypts SRTCP before RTCP processing](https://github.com/signalwire/freeswitch/blob/master/src/switch_rtp.c#L7028-L7094)
+- [FreeSWITCH publishes parsed received-report fields](https://github.com/signalwire/freeswitch/blob/master/src/switch_core_media.c#L2732-L2794)
+- [`fire_rtcp_events` enables generated-report events](https://github.com/signalwire/freeswitch/blob/master/src/switch_core_media.c#L7918-L7924)
+- [Official FreeSWITCH Event Socket protocol](https://developer.signalwire.com/freeswitch/integration/event-socket/)
+- [SIPCAPTURE HEPipe ESL-to-HEP reference implementation](https://github.com/sipcapture/hepipe.js)

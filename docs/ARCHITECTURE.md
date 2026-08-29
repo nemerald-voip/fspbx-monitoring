@@ -10,7 +10,7 @@ call processing must continue independently.
 flowchart LR
     PBX[FreeSWITCH PBX]
     HEP[Native HEP capture]
-    RTCP[RTCP quality sensor]
+    RTCP[ESL RTCP reporter]
     NE[node_exporter]
     FE[freeswitch_exporter]
     AL[Grafana Alloy]
@@ -78,7 +78,8 @@ PBX-side requirements:
 - RTCP quality: PBX to MON01 on the same HEP transport and allowlist.
 - node_exporter: MON01 to PBX TCP 9100.
 - freeswitch_exporter: MON01 to PBX TCP 9282.
-- ESL: local exporter to FreeSWITCH `127.0.0.1:8021`; never remotely exposed.
+- ESL: local exporter and RTCP reporter to FreeSWITCH `127.0.0.1:8021`; never
+  remotely exposed.
 - Alloy to Loki: private/VPN or authenticated TLS HTTP route.
 
 ## Metrics and alert flow
@@ -121,23 +122,24 @@ redundant clusters. Current FS PBX systems generate and persist a random,
 nonzero unsigned 32-bit ID for each hostname. Each server in a redundant system
 still receives its own ID so HOMER can distinguish the nodes.
 
-The PBX-side RTCP sensor reads SIP/SDP only to build an in-memory Call-ID map,
-then sends decoded RTCP reports to HOMER as HEP type 5. Its correlation-only
-SIP socket has no transport, so native FreeSWITCH HEP remains the single SIP
-source and continues to cover TLS signaling. The sensor writes no PCAP and has
-no disk queue. HOMER stores correlated quality reports centrally in
-`homer_data`; see [Centralized RTP/RTCP quality](RTP_QUALITY.md).
+The PBX-side RTCP reporter consumes FreeSWITCH's parsed RTCP and channel events
+through loopback-only ESL, correlates them to SIP Call-IDs, and sends HEP type 5
+JSON to HOMER. FreeSWITCH authenticates and decrypts SRTCP before publishing the
+event, so the reporter needs neither packet capture privileges nor media keys.
+It sends no SIP or RTP payload and has no disk queue. HOMER stores correlated
+quality reports centrally in `homer_data`; see
+[Centralized RTP/RTCP quality](RTP_QUALITY.md).
 
-Separate explicit kernel BPF filters constrain the correlation socket to Sofia
-ports and the reporting socket to RTCP packet types in the RTP range. Startup
-fails closed unless both filters are confirmed for the current systemd
-invocation. Low CPU weight, bounded memory/tasks, disabled swap, and an elevated
-OOM score prioritize FreeSWITCH over this optional sensor during contention.
+The reporter runs as a dynamic unprivileged user with no capabilities. Low CPU
+weight, a 96 MiB hard memory limit, bounded tasks, disabled swap, and an
+elevated OOM score prioritize FreeSWITCH over optional monitoring during
+contention.
 
 RTCP receiver reports identify loss and jitter on the path into the reporting
 endpoint. Reports from FreeSWITCH measure remote-to-PBX media; reports from a
-remote endpoint measure PBX-to-remote media. Missing peer reports, SRTCP,
-bypass media, or unusable SDP can leave one direction unmeasured.
+remote endpoint measure PBX-to-remote media. Missing peer reports, bypass media,
+or missing channel metadata can leave one direction unmeasured. Secure SRTCP
+legs are supported when FreeSWITCH terminates the media.
 
 ## Persistence and retention
 
