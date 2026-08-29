@@ -161,9 +161,11 @@ sudo sh /tmp/install-freeswitch-rtcp-to-hep.sh \
   --esl-password-file /root/esl-password
 ```
 
-The installer renders `/etc/freeswitch-rtcp-to-hep/config.json`, stores the ESL
-credential as `/etc/freeswitch-rtcp-to-hep/esl-password` with mode `0600`, and
-enables `freeswitch-rtcp-to-hep.service`. During an upgrade it stops the old
+The installer creates `/etc/freeswitch-rtcp-to-hep` with mode `0755` and renders
+its non-secret `config.json` with mode `0644`. The ESL credential remains
+`root:root` mode `0600` at `esl-password` and is exposed to the dynamic service
+identity only through `LoadCredential`. The installer then enables
+`freeswitch-rtcp-to-hep.service`. During an upgrade it stops the old
 `heplify-rtcp.service`; if the new unit fails to start, it attempts to restart
 the old unit. It leaves the old binary and configuration in place for rollback.
 

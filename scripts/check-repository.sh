@@ -49,6 +49,8 @@ grep -q '"esl_host": "127.0.0.1"' \
   pbx-agent/rtcp-quality/freeswitch-rtcp-to-hep.json.template
 grep -q '"hep_host": "@@MONITORING_HOST@@"' \
   pbx-agent/rtcp-quality/freeswitch-rtcp-to-hep.json.template
+grep -q 'install -d -o root -g root -m 0755 "$config_dir"' \
+  pbx-agent/rtcp-quality/install.sh
 test ! -e pbx-agent/rtcp-quality/heplify-rtcp.service
 test ! -e pbx-agent/rtcp-quality/heplify.json.template
 test ! -e pbx-agent/rtcp-quality/verify-bpf.sh

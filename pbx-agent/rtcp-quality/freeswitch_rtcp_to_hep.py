@@ -57,6 +57,16 @@ def as_signed_loss(value: Optional[str]) -> int:
     return loss - 0x100000000 if loss > 0x7FFFFFFF else loss
 
 
+def as_ssrc(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        ssrc = int(value, 16)
+    except ValueError:
+        return None
+    return ssrc if 0 <= ssrc <= 0xFFFFFFFF else None
+
+
 def parse_headers(data: bytes) -> Dict[str, str]:
     headers: Dict[str, str] = {}
     for raw_line in data.decode("utf-8", "replace").replace("\r\n", "\n").split("\n"):
@@ -219,8 +229,9 @@ def counter_delta(current: int, previous: int) -> int:
 def rtcp_payload(event: Dict[str, str], state: CallState) -> Optional[dict]:
     received = event.get("Event-Name") == "RECV_RTCP_MESSAGE"
     prefix = "Source0-" if received else "Source-"
-    source_ssrc = event.get(prefix + "SSRC")
-    if not source_ssrc:
+    sender_ssrc = as_ssrc(event.get("SSRC"))
+    source_ssrc = as_ssrc(event.get(prefix + "SSRC"))
+    if sender_ssrc is None or source_ssrc is None:
         return None
 
     packets_now = as_int(event.get("Sender-Packet-Count"))
@@ -247,7 +258,7 @@ def rtcp_payload(event: Dict[str, str], state: CallState) -> Optional[dict]:
 
     return {
         "type": 200,
-        "ssrc": source_ssrc,
+        "ssrc": sender_ssrc,
         "report_count": 1,
         "report_blocks": [
             {

@@ -259,7 +259,7 @@ secret_path=$config_dir/esl-password
 unit_path=$(root_path /etc/systemd/system/freeswitch-rtcp-to-hep.service)
 
 install -d -m 0755 "$(dirname "$bin_path")" "$(dirname "$unit_path")"
-install -d -o root -g root -m 0700 "$config_dir"
+install -d -o root -g root -m 0755 "$config_dir"
 install -m 0755 "$source_dir/freeswitch_rtcp_to_hep.py" "$bin_path"
 install -m 0755 "$source_dir/canary-capture.sh" "$canary_path"
 install -m 0644 "$source_dir/freeswitch-rtcp-to-hep.service" "$unit_path"

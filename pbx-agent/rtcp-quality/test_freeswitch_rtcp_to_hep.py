@@ -84,6 +84,7 @@ class AgentTests(unittest.TestCase):
         state = AGENT.CallState(recv_packets=90, recv_octets=9000, recv_lost=2)
         event = {
             "Event-Name": "RECV_RTCP_MESSAGE",
+            "SSRC": "01020304",
             "Source0-SSRC": "aabbccdd",
             "Source0-Fraction": "3",
             "Source0-Lost": "4",
@@ -98,6 +99,21 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(payload["sender_information"]["packets"], 10)
         self.assertEqual(payload["sender_information"]["octets"], 1000)
         self.assertEqual(payload["report_blocks"][0]["packets_lost"], 2)
+        self.assertEqual(payload["ssrc"], 0x01020304)
+        self.assertEqual(payload["report_blocks"][0]["source_ssrc"], 0xAABBCCDD)
+
+    def test_rtcp_payload_rejects_missing_or_invalid_ssrc(self):
+        state = AGENT.CallState()
+        self.assertIsNone(
+            AGENT.rtcp_payload(
+                {
+                    "Event-Name": "SEND_RTCP_MESSAGE",
+                    "SSRC": "not-hex",
+                    "Source-SSRC": "11223344",
+                },
+                state,
+            )
+        )
 
     def test_hep3_encoding_contains_homer_rtcp_chunks(self):
         payload = b'{"type":200}'
@@ -142,6 +158,7 @@ class AgentTests(unittest.TestCase):
             {
                 "Event-Name": "SEND_RTCP_MESSAGE",
                 "Unique-ID": "leg-1",
+                "SSRC": "a1b2c3d4",
                 "Source-SSRC": "11223344",
                 "Source-Fraction": "0",
                 "Source-Lost": "0",
@@ -154,7 +171,8 @@ class AgentTests(unittest.TestCase):
         chunks = decode_chunks(sender.messages[0])
         self.assertEqual(chunks[17], b"call-1")
         payload = json.loads(chunks[15])
-        self.assertEqual(payload["report_blocks"][0]["source_ssrc"], "11223344")
+        self.assertEqual(payload["ssrc"], 0xA1B2C3D4)
+        self.assertEqual(payload["report_blocks"][0]["source_ssrc"], 0x11223344)
 
     def test_config_rejects_non_loopback_esl(self):
         config = AGENT.Config(
