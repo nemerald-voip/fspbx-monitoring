@@ -45,9 +45,20 @@ The pinned heplify sensor uses two live capture sockets on the PBX:
 2. `rtcp-to-homer` reads only RTCP packets, converts them to HEP protocol type
    5 JSON, attaches the correlated Call-ID, and sends them to MON01 port 9060.
 
+Each socket has its own explicit kernel `bpf_filter`. The SIP socket can receive
+only the configured Sofia port range. The RTCP socket requires an IPv4 UDP
+packet in the configured RTP range with RTP version 2 and an RTCP packet type
+from 200 through 223; ordinary RTP does not reach its userspace decoder.
+An `ExecStartPost` check requires two `BPF filter applied` journal messages from
+the current systemd invocation. A compilation or installation failure makes the
+unit fail instead of continuing unfiltered.
+
 The service disables PCAP output, disk HEP buffering, its HTTP API, and its
 Prometheus listener. It logs operational messages only to the systemd journal.
 The same unique capture ID used by native FreeSWITCH HEP is reused for RTCP.
+It runs at low CPU weight with a 384 MiB soft memory threshold, 512 MiB hard
+limit, no swap allowance, 128-task limit, and `OOMScoreAdjust=500`, so the
+monitoring sensor yields resources before call processing under pressure.
 
 ## 1. Confirm prerequisites on the test PBX
 
@@ -142,6 +153,17 @@ systemctl is-active heplify-rtcp.service
 systemctl status heplify-rtcp.service --no-pager
 journalctl -u heplify-rtcp.service -n 100 --no-pager
 grep -E '"(write_file|enable)"' /etc/heplify-rtcp/heplify.json
+systemctl show heplify-rtcp.service \
+  -p CPUWeight -p MemoryHigh -p MemoryMax -p MemorySwapMax \
+  -p TasksMax -p OOMScoreAdjust
+```
+
+The journal must contain both the helper confirmation and two upstream filter
+messages:
+
+```bash
+journalctl -u heplify-rtcp.service -b --no-pager | \
+  grep -E 'BPF filter applied|verified both heplify kernel BPF filters|Failed to set BPF'
 ```
 
 Place a test call lasting at least 15 seconds. Confirm outbound HEP without
@@ -162,7 +184,86 @@ In HOMER:
 Native SIP capture and the RTCP sensor intentionally share a capture ID. There
 should not be a second copy of each SIP message from heplify.
 
-## 5. Cluster rollout
+## 5. Canary-test FreeSWITCH RTCP audio behavior
+
+Before enabling RTCP across a cluster, run a controlled A/B test on one
+non-production call path. An open FreeSWITCH 1.10.3 report described periodic
+PCMA silence and marker/timestamp anomalies aligned with the configured RTCP
+interval. It is not evidence that FreeSWITCH 1.11.1 has the same behavior, but
+the failure would be media-affecting and warrants a canary.
+
+Use the same caller, destination, carrier, codec, and approximately 45-second
+continuous tone or speech sample for both calls. A continuous tone makes a
+five-second cadence easier to hear. Record at the remote endpoint when possible
+so the observation includes what actually left the PBX.
+
+### Baseline with RTCP disabled
+
+Before adding `rtcp-audio-interval-msec`, capture one call in RAM-backed
+`/run`. The helper is installed with the sensor templates but does not run
+automatically:
+
+```bash
+sudo /usr/local/sbin/rtcp-canary-capture \
+  --interface eth0 \
+  --rtp-start 16384 --rtp-end 32768 \
+  --duration 60 \
+  --output /run/rtcp-canary-off.pcap
+```
+
+The command stops after 60 seconds or 25,000 packets and retains at most 256
+bytes per frame. That is enough to include common G.711 payloads, so the file is
+sensitive even though it is temporary. `/run` does not survive reboot.
+
+### Repeat with RTCP enabled
+
+Enable the five-second RTCP setting on only the Sofia profile used by the test
+route, apply it during a maintenance window, and verify the generated profile.
+Then make the otherwise identical call:
+
+```bash
+sudo /usr/local/sbin/rtcp-canary-capture \
+  --interface eth0 \
+  --rtp-start 16384 --rtp-end 32768 \
+  --duration 60 \
+  --output /run/rtcp-canary-on.pcap
+```
+
+Do not run both captures at once. Keep other calls off the test PBX if possible
+so the comparison contains only the canary.
+
+### Compare the two calls
+
+Copy the two files over SSH to an authorized workstation and open them in
+Wireshark. If Wireshark does not infer RTP, select one stream and use
+**Analyze → Decode As… → RTP**. For each capture:
+
+1. Open **Telephony → RTP → RTP Streams**, select each direction, and choose
+   **Analyze**.
+2. Compare sequence errors, timestamp progression, marker counts, jitter, and
+   lost packets between RTCP-off and RTCP-on calls.
+3. Use display filter `rtp.marker == 1` and check for a new repeating pair of
+   marker packets every five seconds.
+4. Inspect packets around each `rtcp` packet. A reproduction resembles the
+   reported pattern: normal incoming media, followed by PBX-originated marker
+   packets and a silence payload with an abnormal timestamp at the RTCP cadence.
+5. Compare the remote recording for new clicks, gaps, or silence at the same
+   cadence.
+
+Pass the canary only when the RTCP-on call has no new audible cadence, marker
+pair, inserted silence packet, or timestamp discontinuity relative to the
+baseline. If the anomaly appears only on packets leaving FreeSWITCH while the
+corresponding inbound stream remains continuous, stop rollout and preserve the
+small captures for a FreeSWITCH defect report.
+
+After recording the result, delete both sensitive captures from the PBX and
+the workstation:
+
+```bash
+sudo rm -- /run/rtcp-canary-off.pcap /run/rtcp-canary-on.pcap
+```
+
+## 6. Cluster rollout
 
 Install and verify one test server first. Then repeat on every physical server:
 

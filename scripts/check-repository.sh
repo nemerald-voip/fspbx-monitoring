@@ -33,6 +33,17 @@ grep -q '^ExecStart=/opt/monitoring/ops/apply-hep-firewall.sh$' \
   systemd/fspbx-hep-firewall.service
 grep -q '^ExecStart=/usr/local/sbin/heplify -config /etc/heplify-rtcp/heplify.json$' \
   pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '^ExecStartPost=+/usr/local/libexec/verify-heplify-rtcp-bpf$' \
+  pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '^CPUWeight=10$' pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '^MemoryMax=512M$' pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '^MemorySwapMax=0$' pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '^TasksMax=128$' pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '^OOMScoreAdjust=500$' pbx-agent/rtcp-quality/heplify-rtcp.service
+grep -q '"bpf_filter": ".*portrange @@SIP_START@@-@@SIP_END@@' \
+  pbx-agent/rtcp-quality/heplify.json.template
+grep -q '"bpf_filter": "ip and udp and portrange @@RTP_START@@-@@RTP_END@@' \
+  pbx-agent/rtcp-quality/heplify.json.template
 grep -q '"write_file": ""' pbx-agent/rtcp-quality/heplify.json.template
 grep -q '"enable": false' pbx-agent/rtcp-quality/heplify.json.template
 

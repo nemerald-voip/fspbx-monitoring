@@ -14,7 +14,8 @@
       "snap_len": 8192,
       "capture_mode": ["SIP"],
       "fanout_workers": 0,
-      "buffer_size_mb": 32
+      "buffer_size_mb": 32,
+      "bpf_filter": "((tcp or sctp) and greater 42 and portrange @@SIP_START@@-@@SIP_END@@) or (udp and greater 128 and portrange @@SIP_START@@-@@SIP_END@@)"
     },
     {
       "name": "rtcp-to-homer",
@@ -30,7 +31,8 @@
       "snap_len": 2048,
       "capture_mode": ["RTCP"],
       "fanout_workers": 0,
-      "buffer_size_mb": 32
+      "buffer_size_mb": 32,
+      "bpf_filter": "ip and udp and portrange @@RTP_START@@-@@RTP_END@@ and udp[8] & 0xc0 = 0x80 and udp[9] >= 0xc8 and udp[9] <= 0xdf"
     }
   ],
   "transport": [
@@ -59,7 +61,6 @@
   "protocol": [
     {
       "name": "SIP",
-      "filter": "((tcp or sctp) and greater 42 and portrange $minport-$maxport) or (udp and greater 128 and portrange $minport-$maxport) or ip[6:2] & 0x1fff != 0 or ip6[6]=44",
       "min_port": @@SIP_START@@,
       "max_port": @@SIP_END@@,
       "protocol": ["udp", "tcp"],
@@ -67,7 +68,6 @@
     },
     {
       "name": "RTCP",
-      "filter": "(ip and portrange $minport-$maxport and ip[6] & 0x2 = 0 and ip[6:2] & 0x1fff = 0 and udp and udp[8] & 0xc0 = 0x80 and udp[9] >= 0xc8 && udp[9] <= 0xdf)",
       "min_port": @@RTP_START@@,
       "max_port": @@RTP_END@@,
       "protocol": ["udp"],

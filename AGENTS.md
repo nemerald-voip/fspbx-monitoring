@@ -87,7 +87,8 @@ logs and the relevant Prometheus target or UI.
 - `alertmanager/`: default no-op alert delivery configuration.
 - `blackbox/`: HTTP and TCP probe modules.
 - `pbx-agent/`: PBX-side FreeSWITCH, exporter, Alloy, and RTCP sensor examples.
-- `pbx-agent/rtcp-quality/`: live RTCP-to-HEP sensor and repeatable installer.
+- `pbx-agent/rtcp-quality/`: live RTCP-to-HEP sensor, fail-closed BPF check,
+  bounded canary capture, and repeatable installer.
 - `synthetic/`: SIPp OPTIONS scenario, publisher, and timer/service templates.
 - `docs/SYNTHETIC_SIP.md`: scheduled SIP transaction setup and limitations.
 - `docs/RTP_QUALITY.md`: centralized RTCP quality setup and interpretation.

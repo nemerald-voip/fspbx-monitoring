@@ -228,6 +228,12 @@ systemctl status heplify-rtcp.service --no-pager
 journalctl -u heplify-rtcp.service -n 100 --no-pager
 ```
 
+The service deliberately fails startup unless the current invocation confirms
+both per-socket kernel BPF filters. A `Failed to set BPF filter` message or fewer
+than two `BPF filter applied` messages is a hard failure; do not bypass the
+post-start verifier. Check that rendered `bpf_filter` values contain separate
+Sofia and RTCP ranges before retrying.
+
 Place a call lasting at least 15 seconds. If necessary, make a short authorized
 metadata-only observation for RTCP on the PBX's configured RTP range. Missing
 remote reports can leave PBX-to-remote loss unmeasured even when FreeSWITCH's

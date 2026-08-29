@@ -128,6 +128,12 @@ source and continues to cover TLS signaling. The sensor writes no PCAP and has
 no disk queue. HOMER stores correlated quality reports centrally in
 `homer_data`; see [Centralized RTP/RTCP quality](RTP_QUALITY.md).
 
+Separate explicit kernel BPF filters constrain the correlation socket to Sofia
+ports and the reporting socket to RTCP packet types in the RTP range. Startup
+fails closed unless both filters are confirmed for the current systemd
+invocation. Low CPU weight, bounded memory/tasks, disabled swap, and an elevated
+OOM score prioritize FreeSWITCH over this optional sensor during contention.
+
 RTCP receiver reports identify loss and jitter on the path into the reporting
 endpoint. Reports from FreeSWITCH measure remote-to-PBX media; reports from a
 remote endpoint measure PBX-to-remote media. Missing peer reports, SRTCP,

@@ -30,6 +30,7 @@ Usage: install.sh --monitoring-ip HOST [options]
 
 Install a live heplify RTCP quality sensor that sends decoded reports to HOMER.
 It does not write PCAPs, retain RTP payloads, or forward duplicate SIP HEP.
+Startup fails unless both per-socket kernel BPF filters are confirmed.
 
 Required:
   --monitoring-ip HOST    MON01 IP address or private DNS name
@@ -266,7 +267,9 @@ fi
 if [ -z "$source_dir" ]; then
   script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)
   if [ -n "$script_dir" ] && [ -f "$script_dir/heplify.json.template" ] && \
-      [ -f "$script_dir/heplify-rtcp.service" ]; then
+      [ -f "$script_dir/heplify-rtcp.service" ] && \
+      [ -f "$script_dir/verify-bpf.sh" ] && \
+      [ -f "$script_dir/canary-capture.sh" ]; then
     source_dir=$script_dir
   else
     command -v curl >/dev/null 2>&1 || die "curl is required for remote installation"
@@ -276,6 +279,8 @@ if [ -z "$source_dir" ]; then
     log "Downloading RTCP sensor templates from $repository at $version"
     curl -fsSL "$base_url/heplify.json.template" -o "$source_dir/heplify.json.template"
     curl -fsSL "$base_url/heplify-rtcp.service" -o "$source_dir/heplify-rtcp.service"
+    curl -fsSL "$base_url/verify-bpf.sh" -o "$source_dir/verify-bpf.sh"
+    curl -fsSL "$base_url/canary-capture.sh" -o "$source_dir/canary-capture.sh"
   fi
 else
   case "$source_dir" in
@@ -285,6 +290,8 @@ else
 fi
 [ -f "$source_dir/heplify.json.template" ] || die "heplify.json.template is missing"
 [ -f "$source_dir/heplify-rtcp.service" ] || die "heplify-rtcp.service is missing"
+[ -f "$source_dir/verify-bpf.sh" ] || die "verify-bpf.sh is missing"
+[ -f "$source_dir/canary-capture.sh" ] || die "canary-capture.sh is missing"
 
 if [ -z "$binary_source" ]; then
   command -v curl >/dev/null 2>&1 || die "curl is required to download heplify"
@@ -310,10 +317,13 @@ fi
 [ -f "$binary_source" ] || die "heplify binary is missing: $binary_source"
 
 bin_path=$(root_path /usr/local/sbin/heplify)
+canary_path=$(root_path /usr/local/sbin/rtcp-canary-capture)
+verify_path=$(root_path /usr/local/libexec/verify-heplify-rtcp-bpf)
 config_dir=$(root_path /etc/heplify-rtcp)
 config_path=$config_dir/heplify.json
 unit_path=$(root_path /etc/systemd/system/heplify-rtcp.service)
-install -d -m 0755 "$(dirname "$bin_path")" "$(dirname "$unit_path")"
+install -d -m 0755 "$(dirname "$bin_path")" "$(dirname "$verify_path")" \
+  "$(dirname "$unit_path")"
 if [ "$start_service" = true ]; then
   if ! getent passwd heplify >/dev/null 2>&1; then
     useradd --system --no-create-home --home-dir /nonexistent \
@@ -324,6 +334,8 @@ else
   install -d -m 0750 "$config_dir"
 fi
 install -m 0755 "$binary_source" "$bin_path"
+install -m 0755 "$source_dir/canary-capture.sh" "$canary_path"
+install -m 0755 "$source_dir/verify-bpf.sh" "$verify_path"
 install -m 0644 "$source_dir/heplify-rtcp.service" "$unit_path"
 
 config_tmp=$(mktemp)
@@ -366,6 +378,7 @@ echo "RTP/RTCP range: $rtp_start-$rtp_end/udp"
 echo "HOMER: $monitoring_host:9060/$hep_transport"
 echo "Local PCAP writing: disabled"
 echo "Disk HEP buffering: disabled"
+echo "Kernel BPF startup verification: required"
 if [ "$start_service" = false ] && [ -z "$install_root" ]; then
   echo "To start: systemctl enable --now heplify-rtcp.service"
 fi

@@ -4,6 +4,8 @@ Documentation=https://github.com/nemerald-voip/fspbx-monitoring
 Wants=network-online.target
 After=network-online.target freeswitch.service
 ConditionPathExists=/etc/heplify-rtcp/heplify.json
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -13,8 +15,15 @@ RuntimeDirectory=heplify-rtcp
 RuntimeDirectoryMode=0750
 WorkingDirectory=/run/heplify-rtcp
 ExecStart=/usr/local/sbin/heplify -config /etc/heplify-rtcp/heplify.json
+ExecStartPost=+/usr/local/libexec/verify-heplify-rtcp-bpf
 Restart=on-failure
 RestartSec=5s
+CPUWeight=10
+MemoryHigh=384M
+MemoryMax=512M
+MemorySwapMax=0
+TasksMax=128
+OOMScoreAdjust=500
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=true
