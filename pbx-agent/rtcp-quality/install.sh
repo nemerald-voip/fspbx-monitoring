@@ -182,8 +182,9 @@ if [ -z "$capture_id" ]; then
   capture_id=$(fs_cli -x 'global_getvar hep_capture_id' | sed -n '1p')
 fi
 is_uint "$capture_id" || die "capture ID must be an unsigned integer"
-[ "$capture_id" -ge 1 ] && [ "$capture_id" -le 4294967295 ] || \
+if [ "$capture_id" -lt 1 ] || [ "$capture_id" -gt 4294967295 ]; then
   die "capture ID must be between 1 and 4294967295"
+fi
 
 if [ -z "$esl_password_file" ]; then
   [ "$start_service" = true ] || \
@@ -196,9 +197,10 @@ if [ -z "$esl_password_file" ]; then
     "$event_socket_config" | sed -n '$p')
   [ -n "$configured_password" ] || \
     die "could not resolve the ESL password; use --esl-password-file"
+  variable_prefix=\$\$\{
   case "$configured_password" in
-    '$${'*'}')
-      variable_name=${configured_password#'$${'}
+    "$variable_prefix"*'}')
+      variable_name=${configured_password#"$variable_prefix"}
       variable_name=${variable_name%'}'}
       configured_password=$(fs_cli -x "global_getvar $variable_name" | sed -n '1p')
       ;;
@@ -218,7 +220,9 @@ line_count=$(awk 'END { print NR }' "$esl_password_file")
 unset password_line configured_password
 
 if [ -z "$source_dir" ]; then
-  script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)
+  if ! script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd); then
+    script_dir=
+  fi
   if [ -n "$script_dir" ] && \
       [ -f "$script_dir/freeswitch_rtcp_to_hep.py" ] && \
       [ -f "$script_dir/freeswitch-rtcp-to-hep.json.template" ] && \

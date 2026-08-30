@@ -168,7 +168,10 @@ leave the process. Reports go to HOMER over the same HEP 9060 allowlist and
 populate the original inbound/A-leg transaction's **QoS** view. The reporter
 groups FreeSWITCH B2BUA channels by `Channel-Call-UUID` and uses that A-leg SIP
 Call-ID for phone-facing and carrier-facing reports, rather than splitting QoS
-between the two SIP dialogs. Read the complete
+between the two SIP dialogs. It preserves cumulative RTCP counters and every
+reported `SourceN` block, adds FreeSWITCH's calculated RTT to the stored JSON,
+and logs per-direction forwarding and skip counters about once per minute. Read
+the complete
 [centralized RTP/RTCP procedure](../docs/RTP_QUALITY.md), including its
 directional-loss interpretation, ESL credential handling, resource limits, and
 RTCP-off/RTCP-on media canary before rollout.

@@ -86,8 +86,9 @@ class AgentTests(unittest.TestCase):
                 "Other-Leg-Unique-ID": "a-leg",
             }
         )
-        correlation_id, _ = cache.resolve({"Unique-ID": "b-leg"})
+        correlation_id, _, fallback = cache.resolve({"Unique-ID": "b-leg"})
         self.assertEqual(correlation_id, "call@example.net")
+        self.assertFalse(fallback)
 
     def test_cache_uses_one_canonical_call_id_for_both_sip_legs(self):
         cache = AGENT.CallCache()
@@ -110,8 +111,8 @@ class AgentTests(unittest.TestCase):
             }
         )
 
-        a_call_id, _ = cache.resolve({"Unique-ID": "a-leg"})
-        b_call_id, _ = cache.resolve({"Unique-ID": "b-leg"})
+        a_call_id, _, _ = cache.resolve({"Unique-ID": "a-leg"})
+        b_call_id, _, _ = cache.resolve({"Unique-ID": "b-leg"})
 
         self.assertEqual(a_call_id, "phone-call-id")
         self.assertEqual(b_call_id, "phone-call-id")
@@ -135,7 +136,7 @@ class AgentTests(unittest.TestCase):
             }
         )
 
-        correlation_id, _ = cache.resolve({"Unique-ID": "b-leg"})
+        correlation_id, _, _ = cache.resolve({"Unique-ID": "b-leg"})
 
         self.assertEqual(correlation_id, "phone-call-id")
 
@@ -150,12 +151,19 @@ class AgentTests(unittest.TestCase):
             }
         )
 
-        correlation_id, _ = cache.resolve({"Unique-ID": "single-leg"})
+        correlation_id, _, fallback = cache.resolve({"Unique-ID": "single-leg"})
 
         self.assertEqual(correlation_id, "single-call-id")
+        self.assertFalse(fallback)
 
-    def test_rtcp_payload_converts_cumulative_values_to_intervals(self):
-        state = AGENT.CallState(recv_packets=90, recv_octets=9000, recv_lost=2)
+    def test_cache_marks_uuid_only_correlation_as_fallback(self):
+        correlation_id, _, fallback = AGENT.CallCache().resolve(
+            {"Unique-ID": "uuid-only"}
+        )
+        self.assertEqual(correlation_id, "uuid-only")
+        self.assertTrue(fallback)
+
+    def test_rtcp_payload_preserves_cumulative_values(self):
         event = {
             "Event-Name": "RECV_RTCP_MESSAGE",
             "SSRC": "01020304",
@@ -169,15 +177,59 @@ class AgentTests(unittest.TestCase):
             "Sender-Packet-Count": "100",
             "Octect-Packet-Count": "10000",
         }
-        payload = AGENT.rtcp_payload(event, state)
-        self.assertEqual(payload["sender_information"]["packets"], 10)
-        self.assertEqual(payload["sender_information"]["octets"], 1000)
-        self.assertEqual(payload["report_blocks"][0]["packets_lost"], 2)
+        diagnostics = AGENT.Diagnostics()
+        payload = AGENT.rtcp_payload(event, diagnostics)
+        self.assertEqual(payload["sender_information"]["packets"], 100)
+        self.assertEqual(payload["sender_information"]["octets"], 10000)
+        self.assertEqual(payload["report_blocks"][0]["packets_lost"], 4)
         self.assertEqual(payload["ssrc"], 0x01020304)
         self.assertEqual(payload["report_blocks"][0]["source_ssrc"], 0xAABBCCDD)
+        self.assertEqual(payload["type"], 200)
+        self.assertEqual(payload["type_source"], "compatibility_fallback")
+        self.assertEqual(diagnostics.received_type_fallbacks, 1)
+
+    def test_rtcp_payload_preserves_all_blocks_and_exposes_rtt(self):
+        diagnostics = AGENT.Diagnostics()
+        payload = AGENT.rtcp_payload(
+            {
+                "Event-Name": "RECV_RTCP_MESSAGE",
+                "SSRC": "01020304",
+                "Source0-SSRC": "11111111",
+                "Source0-Lost": "1",
+                "Rtt0-Avg": "0.012500",
+                "Source1-SSRC": "22222222",
+                "Source1-Lost": "4294967295",
+                "Rtt1-Avg": "0.025",
+            },
+            diagnostics,
+        )
+        self.assertEqual(payload["report_count"], 2)
+        self.assertEqual(
+            [block["source_ssrc"] for block in payload["report_blocks"]],
+            [0x11111111, 0x22222222],
+        )
+        self.assertEqual(payload["report_blocks"][0]["rtt_avg_seconds"], 0.0125)
+        self.assertEqual(payload["report_blocks"][0]["rtt_avg_ms"], 12.5)
+        self.assertEqual(payload["report_blocks"][1]["packets_lost"], -1)
+        self.assertEqual(diagnostics.rtt_blocks, 2)
+
+    def test_rtcp_payload_uses_explicit_receiver_report_type(self):
+        payload = AGENT.rtcp_payload(
+            {
+                "Event-Name": "RECV_RTCP_MESSAGE",
+                "RTCP-Packet-Type": "RR",
+                "SSRC": "01020304",
+                "Source0-SSRC": "11111111",
+                "Sender-Packet-Count": "999",
+                "Octect-Packet-Count": "9999",
+            }
+        )
+        self.assertEqual(payload["type"], 201)
+        self.assertEqual(payload["type_source"], "freeswitch_event")
+        self.assertNotIn("sender_information", payload)
 
     def test_rtcp_payload_rejects_missing_or_invalid_ssrc(self):
-        state = AGENT.CallState()
+        diagnostics = AGENT.Diagnostics()
         self.assertIsNone(
             AGENT.rtcp_payload(
                 {
@@ -185,9 +237,25 @@ class AgentTests(unittest.TestCase):
                     "SSRC": "not-hex",
                     "Source-SSRC": "11223344",
                 },
-                state,
+                diagnostics,
             )
         )
+        self.assertEqual(diagnostics.invalid_sender_ssrc, 1)
+
+    def test_rtcp_payload_skips_invalid_blocks_but_keeps_valid_ones(self):
+        diagnostics = AGENT.Diagnostics()
+        payload = AGENT.rtcp_payload(
+            {
+                "Event-Name": "RECV_RTCP_MESSAGE",
+                "SSRC": "01020304",
+                "Source0-SSRC": "not-hex",
+                "Source1-SSRC": "22222222",
+            },
+            diagnostics,
+        )
+        self.assertEqual(payload["report_count"], 1)
+        self.assertEqual(payload["report_blocks"][0]["source_ssrc"], 0x22222222)
+        self.assertEqual(diagnostics.invalid_report_blocks, 1)
 
     def test_hep3_encoding_contains_homer_rtcp_chunks(self):
         payload = b'{"type":200}'
@@ -218,6 +286,7 @@ class AgentTests(unittest.TestCase):
         )
         cache = AGENT.CallCache()
         sender = FakeSender()
+        diagnostics = AGENT.Diagnostics()
         cache.update(
             {
                 "Unique-ID": "leg-1",
@@ -240,6 +309,7 @@ class AgentTests(unittest.TestCase):
             cache,
             sender,
             config,
+            diagnostics,
         )
         self.assertTrue(sent)
         chunks = decode_chunks(sender.messages[0])
@@ -247,6 +317,12 @@ class AgentTests(unittest.TestCase):
         payload = json.loads(chunks[15])
         self.assertEqual(payload["ssrc"], 0xA1B2C3D4)
         self.assertEqual(payload["report_blocks"][0]["source_ssrc"], 0x11223344)
+        self.assertEqual(payload["type_source"], "freeswitch_send_event")
+        self.assertEqual(diagnostics.rtcp_events, 1)
+        self.assertEqual(diagnostics.send_events, 1)
+        self.assertEqual(diagnostics.hep_sent, 1)
+        self.assertEqual(diagnostics.peer_to_pbx_sent, 1)
+        self.assertEqual(diagnostics.report_blocks_sent, 1)
 
     def test_handle_event_sends_both_legs_under_inbound_call_id(self):
         config = AGENT.Config(
@@ -254,6 +330,7 @@ class AgentTests(unittest.TestCase):
         )
         cache = AGENT.CallCache()
         sender = FakeSender()
+        diagnostics = AGENT.Diagnostics()
         cache.update(
             {
                 "Unique-ID": "a-leg",
@@ -281,11 +358,33 @@ class AgentTests(unittest.TestCase):
                 cache,
                 sender,
                 config,
+                diagnostics,
             )
             self.assertTrue(sent)
 
         correlation_ids = [decode_chunks(message)[17] for message in sender.messages]
         self.assertEqual(correlation_ids, [b"phone-call-id", b"phone-call-id"])
+        self.assertEqual(diagnostics.hep_sent, 2)
+
+    def test_handle_event_counts_uuid_correlation_fallback(self):
+        config = AGENT.Config(
+            "127.0.0.1", 8021, "192.0.2.50", 9060, "udp", 1000, "pbx-1"
+        )
+        diagnostics = AGENT.Diagnostics()
+        sent = AGENT.handle_event(
+            {
+                "Event-Name": "SEND_RTCP_MESSAGE",
+                "Unique-ID": "uuid-only",
+                "SSRC": "a1b2c3d4",
+                "Source-SSRC": "11223344",
+            },
+            AGENT.CallCache(),
+            FakeSender(),
+            config,
+            diagnostics,
+        )
+        self.assertTrue(sent)
+        self.assertEqual(diagnostics.correlation_fallbacks, 1)
 
     def test_config_rejects_non_loopback_esl(self):
         config = AGENT.Config(

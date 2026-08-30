@@ -87,12 +87,16 @@ esac
 for value in "$rtp_start" "$rtp_end" "$duration" "$packet_limit"; do
   is_uint "$value" || die "numeric setting is invalid: $value"
 done
-[ "$rtp_start" -ge 1024 ] && [ "$rtp_end" -le 65535 ] && \
-  [ "$rtp_start" -lt "$rtp_end" ] || die "invalid RTP range"
-[ "$duration" -ge 10 ] && [ "$duration" -le 180 ] || \
+if [ "$rtp_start" -lt 1024 ] || [ "$rtp_end" -gt 65535 ] || \
+    [ "$rtp_start" -ge "$rtp_end" ]; then
+  die "invalid RTP range"
+fi
+if [ "$duration" -lt 10 ] || [ "$duration" -gt 180 ]; then
   die "duration must be between 10 and 180 seconds"
-[ "$packet_limit" -ge 1000 ] && [ "$packet_limit" -le 100000 ] || \
+fi
+if [ "$packet_limit" -lt 1000 ] || [ "$packet_limit" -gt 100000 ]; then
   die "packet count must be between 1000 and 100000"
+fi
 
 command -v ip >/dev/null 2>&1 || die "the ip command is required"
 command -v tcpdump >/dev/null 2>&1 || die "tcpdump is required"

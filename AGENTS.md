@@ -142,6 +142,7 @@ The following files are intentionally local and must remain ignored:
 
 - `.env`
 - `.installed-version`
+- `.installed-files`
 - `prometheus/targets/*.yml`
 - `*.pcap` and `*.pcapng`
 - `backups/` and `data/`
@@ -210,6 +211,11 @@ scope.
 - Existing Docker CE is reused; missing Docker CE is installed officially.
 - Existing `.env` is preserved.
 - Existing `prometheus/targets/*.yml` files are preserved.
+- Existing local Alertmanager routing and other untracked operator files are
+  preserved.
+- A source Compose model is validated before managed files are refreshed.
+- `.installed-files` limits update cleanup to paths managed by the prior run,
+  and `.installed-version` records the exact source revision.
 - The reconciler is rendered for a custom installation directory.
 - Default behavior generates secrets, validates Compose, pulls images, and
   starts the stack.

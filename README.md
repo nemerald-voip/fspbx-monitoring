@@ -7,22 +7,28 @@ optional SIPp checks.
 The monitoring server stays outside the live call path. If it fails, calls,
 registrations, routing, and RTP must continue normally.
 
-## Start on a new server
+## Install or update
 
 Supported hosts are Debian 11, 12, and 13 with systemd. The repository defaults
 are sized for roughly 8 vCPU, 24 GB RAM, and a 300 GB SSD, but actual needs depend
 on SIP and log volume.
 
-Install the current `main` branch:
+Install the current `main` branch on a new server, or update an existing
+`/opt/monitoring` deployment with the same command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/install.sh | sudo sh
 ```
 
-This command installs Docker CE when needed, deploys to `/opt/monitoring`,
-generates credentials, installs the reboot reconciler, pulls the pinned images,
-and starts the stack. It does **not** configure firewall rules, DNS, TLS, a VPN,
-PBX agents, or external alert delivery.
+On an update, the installer validates the downloaded Compose model before
+copying it, refreshes managed repository files, removes only obsolete files
+recorded in its prior manifest, preserves local configuration and named
+volumes, pulls pinned images, and reconciles changed services. It records the
+exact Git revision in `/opt/monitoring/.installed-version`.
+
+On a new server, the command also installs Docker CE when needed, generates
+credentials, and installs the reboot reconciler. It does **not** configure
+firewall rules, DNS, TLS, a VPN, PBX agents, or external alert delivery.
 
 Read the complete [new-server guide](docs/GETTING_STARTED.md) before using this
 in production. It includes the review-before-execution flow, prepare-only mode,

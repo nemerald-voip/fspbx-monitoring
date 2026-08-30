@@ -1,5 +1,6 @@
 .env
 .installed-version
+.installed-files
 *.pcap
 *.pcapng
 backups/

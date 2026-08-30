@@ -133,6 +133,13 @@ SIP or RTP payload and has no disk queue. HOMER stores correlated quality
 reports centrally in `homer_data`; see
 [Centralized RTP/RTCP quality](RTP_QUALITY.md).
 
+RTCP packet, octet, and loss counters remain cumulative, all FreeSWITCH
+`SourceN` report blocks are retained, and received-report RTT is included in
+seconds and milliseconds. The reporter writes process-lifetime ingest,
+forward, skip, correlation-fallback, type-fallback, RTT, and directional totals
+to its systemd journal about once per minute. These diagnostics add no listener
+or monitoring dependency to the call path.
+
 The reporter runs as a dynamic unprivileged user with no capabilities. Low CPU
 weight, a 96 MiB hard memory limit, bounded tasks, disabled swap, and an
 elevated OOM score prioritize FreeSWITCH over optional monitoring during
@@ -195,10 +202,15 @@ No PBX should synchronously depend on a central monitoring response.
 ## Repository configuration layers
 
 1. Tracked defaults: Compose, Prometheus, Loki, Grafana, and example files.
-2. Local deployment configuration: `.env` and `prometheus/targets/*.yml`.
+2. Local deployment configuration: `.env`, `prometheus/targets/*.yml`, and
+   optional local Alertmanager routing.
 3. Persistent runtime state: named Docker volumes.
 4. PBX-local configuration: systemd environments, FreeSWITCH snippets, and
    the live RTCP sensor configuration.
+
+The installer records its managed path set in `.installed-files` and the exact
+deployed source revision in `.installed-version`. Updates replace that managed
+set while leaving the local configuration and persistent-state layers intact.
 
 Keeping these layers separate makes upgrades repeatable without committing
 secrets or infrastructure inventory.

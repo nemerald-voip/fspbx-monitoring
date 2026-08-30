@@ -49,6 +49,43 @@ available, remote-to-PBX media is measured but PBX-to-remote delivery is not.
 Missing peer reports, bypass media, and missing media variables can leave a
 direction absent or reduce address detail.
 
+## Field semantics and HOMER limits
+
+The reporter preserves the values FreeSWITCH parsed from each RTCP packet:
+
+- `sender_information.packets` and `sender_information.octets` are cumulative
+  since the sender started the RTP stream. They should rise over a call; they
+  are not five-second interval deltas.
+- `report_blocks[].packets_lost` is the signed cumulative loss count from the
+  report block. `fraction_lost` is the interval loss fraction on a 0-255 scale.
+- `ia_jitter` is expressed in the RTP stream's timestamp units, not necessarily
+  milliseconds.
+- `lsr` is the middle 32 bits of an NTP timestamp and `dlsr` is in 1/65536
+  second units. Neither is a direct RTT measurement.
+- For received reports, FreeSWITCH's smoothed `RttN-Avg` is retained as
+  `rtt_avg_seconds` and converted to `rtt_avg_ms` in the corresponding report
+  block. A zero value means FreeSWITCH had not derived a usable RTT sample.
+
+All valid `Source0`, `Source1`, and later report blocks are retained, and
+`report_count` equals the number sent. FreeSWITCH currently supports at most
+five blocks. HOMER 11.0.333 stores the complete JSON payload but its QoS graph
+reads only `report_blocks[0]`; inspect the RTCP payload through HOMER's message
+or export view when later blocks matter. That HOMER version also does not graph
+`rtt_avg_ms`, so RTT is available in the stored/exported JSON rather than as a
+QoS series. It also requires SR `sender_information` before plotting a record,
+so a standards-correct type `201` RR can be stored and exported without
+appearing as a graph point.
+
+FreeSWITCH retains the received RTCP packet type internally but does not expose
+it in `RECV_RTCP_MESSAGE`. It emits `SEND_RTCP_MESSAGE` only for a locally
+generated sender report, so those events are reliably type `200`. For received
+events, the reporter honors `RTCP-Packet-Type`, `Packet-Type`, or `RTCP-Type`
+when a patched or future FreeSWITCH supplies one. Otherwise it uses type `200`
+for HOMER compatibility, sets `type_source` to `compatibility_fallback`, and
+counts the event in `received_type_fallbacks`; it does not claim that SR and RR
+were distinguished. An explicitly identified RR is sent as type `201` without
+SR-only `sender_information`.
+
 ## Correlation across FreeSWITCH SIP legs
 
 FreeSWITCH is a back-to-back user agent: an A-leg and its originated B-leg
@@ -227,6 +264,35 @@ In HOMER:
 Native SIP capture and this reporter intentionally share a capture ID. The
 reporter sends HEP type 5 only, so it cannot duplicate SIP messages.
 
+The reporter writes a cumulative diagnostic summary to the journal roughly
+once per minute. Show only those summaries with:
+
+```bash
+journalctl -u freeswitch-rtcp-to-hep.service \
+  --since '10 minutes ago' --no-pager | grep 'diagnostics '
+```
+
+Interpret the counters as follows:
+
+| Counter | Meaning |
+|---|---|
+| `rtcp_events`, `recv`, `send` | All RTCP ESL events and their two event classes |
+| `hep_sent`, `hep_failed` | HEP messages accepted by the local socket call or rejected with an error |
+| `blocks_sent` | Valid report blocks included in successful HEP messages |
+| `pbx_to_peer` | Received peer reports describing RTP sent by the PBX |
+| `peer_to_pbx` | PBX-generated reports describing RTP received by the PBX |
+| `missing_uuid` | Events skipped because no FreeSWITCH channel UUID was present |
+| `correlation_fallbacks` | Events sent under a channel UUID because no SIP Call-ID was available |
+| `invalid_sender_ssrc`, `invalid_blocks`, `no_valid_blocks` | Malformed or incomplete reports that were partly or wholly skipped |
+| `received_type_fallbacks` | Received reports whose SR/RR type FreeSWITCH did not expose |
+| `invalid_explicit_types` | Unrecognized explicit packet-type headers |
+| `rtt_blocks` | Parsed report blocks containing a usable FreeSWITCH RTT value |
+
+The values are process-lifetime totals and reset when the service restarts.
+For UDP, `hep_sent` means the kernel accepted the datagram; it cannot prove
+MON01 or HOMER stored it. Compare these totals with HOMER ingest and the HEP
+allowlist when diagnosing delivery.
+
 ## 5. Canary-test FreeSWITCH RTCP audio behavior
 
 The completed A/B canary found no repeating marker packets, sequence loss, or
@@ -286,6 +352,11 @@ An ESL authentication error means the root-only credential does not match
 RTCP is not active on that leg or no peer report arrived. `RECV_RTCP_MESSAGE`
 can still cover peer-generated reports without `fire_rtcp_events`; missing
 `SEND_RTCP_MESSAGE` specifically points to the channel variable or its timing.
+If `send` rises but `recv` does not for the carrier-facing channel, FreeSWITCH
+is generating its report but no carrier RTCP is reaching that leg. Check the
+carrier SDP RTCP address and port, RTCP mux negotiation, firewall/NAT state, and
+an authorized bounded capture separately; Call-ID correlation cannot
+manufacture a report the carrier did not send.
 
 If the phone-facing and carrier-facing reports are split between the two SIP
 Call-IDs, confirm the PBX runs a reporter version with canonical
@@ -312,8 +383,12 @@ history.
 
 ## Implementation references
 
-- [FreeSWITCH authenticates/decrypts SRTCP before RTCP processing](https://github.com/signalwire/freeswitch/blob/master/src/switch_rtp.c#L7028-L7094)
-- [FreeSWITCH publishes parsed received-report fields](https://github.com/signalwire/freeswitch/blob/master/src/switch_core_media.c#L2732-L2794)
-- [`fire_rtcp_events` enables generated-report events](https://github.com/signalwire/freeswitch/blob/master/src/switch_core_media.c#L7918-L7924)
+- [FreeSWITCH authenticates/decrypts SRTCP before RTCP processing](https://github.com/signalwire/freeswitch/blob/master/src/switch_rtp.c#L7638-L7671)
+- [FreeSWITCH stores received packet type and calculates RTT](https://github.com/signalwire/freeswitch/blob/master/src/switch_rtp.c#L7264-L7405)
+- [FreeSWITCH exports every report block and RTT to the received event](https://github.com/signalwire/freeswitch/blob/master/src/switch_core_media.c#L2960-L3030)
+- [RFC 3550 sender and receiver report fields](https://www.rfc-editor.org/rfc/rfc3550.html#section-6.4)
+- [HOMER RTPEngine example with cumulative counters](https://github.com/sipcapture/homer/wiki/Examples:-RTPEngine)
+- [HOMER 11.0.333 QoS parser reads the first report block](https://github.com/sipcapture/homer/blob/11.0.333/src/ui/src/dashboard/QosPanel.tsx#L128-L182)
+- [`fire_rtcp_events` enables generated-report events](https://github.com/signalwire/freeswitch/blob/master/src/switch_core_media.c#L8588-L8593)
 - [Official FreeSWITCH Event Socket protocol](https://developer.signalwire.com/freeswitch/integration/event-socket/)
 - [SIPCAPTURE HEPipe ESL-to-HEP reference implementation](https://github.com/sipcapture/hepipe.js)

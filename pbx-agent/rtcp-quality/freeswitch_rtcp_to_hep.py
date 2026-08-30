@@ -7,7 +7,9 @@ import argparse
 import ipaddress
 import json
 import logging
+import math
 import os
+import re
 import signal
 import socket
 import struct
@@ -163,12 +165,6 @@ class CallState:
     remote_ip: str = "127.0.0.1"
     local_port: int = 0
     remote_port: int = 0
-    recv_packets: int = 0
-    recv_octets: int = 0
-    recv_lost: int = 0
-    send_packets: int = 0
-    send_octets: int = 0
-    send_lost: int = 0
     updated_at: float = 0.0
 
 
@@ -177,6 +173,56 @@ class CallGroup:
     correlation_id: str = ""
     priority: int = 0
     updated_at: float = 0.0
+
+
+@dataclass
+class Diagnostics:
+    rtcp_events: int = 0
+    recv_events: int = 0
+    send_events: int = 0
+    hep_sent: int = 0
+    hep_send_failed: int = 0
+    report_blocks_sent: int = 0
+    pbx_to_peer_sent: int = 0
+    peer_to_pbx_sent: int = 0
+    skipped_missing_uuid: int = 0
+    correlation_fallbacks: int = 0
+    invalid_sender_ssrc: int = 0
+    invalid_report_blocks: int = 0
+    skipped_no_valid_blocks: int = 0
+    received_type_fallbacks: int = 0
+    invalid_explicit_types: int = 0
+    rtt_blocks: int = 0
+    last_logged_at: float = 0.0
+
+    def log_summary(self, force: bool = False, now: Optional[float] = None) -> None:
+        current = time.monotonic() if now is None else now
+        if not force and current - self.last_logged_at < 60:
+            return
+        self.last_logged_at = current
+        LOG.info(
+            "diagnostics rtcp_events=%d recv=%d send=%d hep_sent=%d "
+            "hep_failed=%d blocks_sent=%d pbx_to_peer=%d peer_to_pbx=%d "
+            "missing_uuid=%d correlation_fallbacks=%d invalid_sender_ssrc=%d "
+            "invalid_blocks=%d no_valid_blocks=%d received_type_fallbacks=%d "
+            "invalid_explicit_types=%d rtt_blocks=%d",
+            self.rtcp_events,
+            self.recv_events,
+            self.send_events,
+            self.hep_sent,
+            self.hep_send_failed,
+            self.report_blocks_sent,
+            self.pbx_to_peer_sent,
+            self.peer_to_pbx_sent,
+            self.skipped_missing_uuid,
+            self.correlation_fallbacks,
+            self.invalid_sender_ssrc,
+            self.invalid_report_blocks,
+            self.skipped_no_valid_blocks,
+            self.received_type_fallbacks,
+            self.invalid_explicit_types,
+            self.rtt_blocks,
+        )
 
 
 class CallCache:
@@ -221,7 +267,7 @@ class CallCache:
         state.updated_at = time.monotonic() if now is None else now
         self.update_group(state, state.updated_at)
 
-    def resolve(self, event: Dict[str, str]) -> Tuple[str, CallState]:
+    def resolve(self, event: Dict[str, str]) -> Tuple[str, CallState, bool]:
         unique_id = event.get("Unique-ID", "")
         self.update(event)
         state = self.states[unique_id]
@@ -236,8 +282,9 @@ class CallCache:
             call_id = other_state.call_id
         else:
             call_id = state.call_id or (other_state.call_id if other_state else "")
-            call_id = call_id or event.get("variable_sip_call_id", "") or unique_id
-        return call_id, state
+            call_id = call_id or event.get("variable_sip_call_id", "")
+        fallback = not call_id
+        return call_id or unique_id, state, fallback
 
     def remove(self, event: Dict[str, str]) -> None:
         self.states.pop(event.get("Unique-ID", ""), None)
@@ -260,67 +307,97 @@ class CallCache:
             self.groups.pop(key, None)
 
 
-def counter_delta(current: int, previous: int) -> int:
-    if current < previous:
-        return current
-    return current - previous
+def source_prefixes(event: Dict[str, str]) -> list[str]:
+    indexed = []
+    for name in event:
+        match = re.fullmatch(r"Source(\d+)-SSRC", name)
+        if match:
+            indexed.append((int(match.group(1)), f"Source{match.group(1)}-"))
+    if indexed:
+        return [prefix for _, prefix in sorted(indexed)]
+    return ["Source-"] if "Source-SSRC" in event else []
 
 
-def rtcp_payload(event: Dict[str, str], state: CallState) -> Optional[dict]:
-    received = event.get("Event-Name") == "RECV_RTCP_MESSAGE"
-    prefix = "Source0-" if received else "Source-"
+def rtcp_packet_type(
+    event: Dict[str, str], diagnostics: Diagnostics
+) -> Tuple[int, str]:
+    for name in ("RTCP-Packet-Type", "Packet-Type", "RTCP-Type"):
+        value = event.get(name, "").strip().upper()
+        if not value:
+            continue
+        if value in {"SR", "200"}:
+            return 200, "freeswitch_event"
+        if value in {"RR", "201"}:
+            return 201, "freeswitch_event"
+        diagnostics.invalid_explicit_types += 1
+        break
+    if event.get("Event-Name") == "SEND_RTCP_MESSAGE":
+        # FreeSWITCH currently fires SEND_RTCP_MESSAGE only from its SR branch.
+        return 200, "freeswitch_send_event"
+    # Current FreeSWITCH stores packet_type internally but does not put it on
+    # RECV_RTCP_MESSAGE. Keep HOMER-compatible SR framing and expose/count the
+    # uncertainty instead of pretending that received SR and RR are separable.
+    diagnostics.received_type_fallbacks += 1
+    return 200, "compatibility_fallback"
+
+
+def rtcp_payload(
+    event: Dict[str, str], diagnostics: Optional[Diagnostics] = None
+) -> Optional[dict]:
+    diagnostics = diagnostics or Diagnostics()
     sender_ssrc = as_ssrc(event.get("SSRC"))
-    source_ssrc = as_ssrc(event.get(prefix + "SSRC"))
-    if sender_ssrc is None or source_ssrc is None:
+    if sender_ssrc is None:
+        diagnostics.invalid_sender_ssrc += 1
         return None
 
-    packets_now = as_int(event.get("Sender-Packet-Count"))
-    octets_now = as_int(event.get("Octect-Packet-Count"))
-    lost_now = as_signed_loss(event.get(prefix + "Lost"))
-    if received:
-        packets = counter_delta(packets_now, state.recv_packets)
-        octets = counter_delta(octets_now, state.recv_octets)
-        lost = counter_delta(lost_now, state.recv_lost)
-        state.recv_packets, state.recv_octets, state.recv_lost = (
-            packets_now,
-            octets_now,
-            lost_now,
-        )
-    else:
-        packets = counter_delta(packets_now, state.send_packets)
-        octets = counter_delta(octets_now, state.send_octets)
-        lost = counter_delta(lost_now, state.send_lost)
-        state.send_packets, state.send_octets, state.send_lost = (
-            packets_now,
-            octets_now,
-            lost_now,
-        )
+    report_blocks = []
+    for prefix in source_prefixes(event):
+        source_ssrc = as_ssrc(event.get(prefix + "SSRC"))
+        if source_ssrc is None:
+            diagnostics.invalid_report_blocks += 1
+            continue
+        block = {
+            "source_ssrc": source_ssrc,
+            "fraction_lost": as_int(event.get(prefix + "Fraction")),
+            "packets_lost": as_signed_loss(event.get(prefix + "Lost")),
+            "highest_seq_no": as_int(
+                event.get(prefix + "Highest-Sequence-Number-Received")
+            ),
+            "lsr": as_int(event.get(prefix + "LSR")),
+            "ia_jitter": as_float(event.get(prefix + "Jitter")),
+            "dlsr": as_int(event.get(prefix + "DLSR")),
+        }
+        rtt_value = event.get(prefix.replace("Source", "Rtt") + "Avg")
+        if rtt_value is not None:
+            rtt_seconds = as_float(rtt_value, -1.0)
+            if math.isfinite(rtt_seconds) and rtt_seconds >= 0:
+                block["rtt_avg_seconds"] = rtt_seconds
+                block["rtt_avg_ms"] = round(rtt_seconds * 1000, 3)
+                if rtt_seconds > 0:
+                    diagnostics.rtt_blocks += 1
+        report_blocks.append(block)
 
-    return {
-        "type": 200,
+    if not report_blocks:
+        diagnostics.skipped_no_valid_blocks += 1
+        return None
+
+    packet_type, type_source = rtcp_packet_type(event, diagnostics)
+    payload = {
+        "type": packet_type,
+        "type_source": type_source,
         "ssrc": sender_ssrc,
-        "report_count": 1,
-        "report_blocks": [
-            {
-                "source_ssrc": source_ssrc,
-                "fraction_lost": as_int(event.get(prefix + "Fraction")),
-                "packets_lost": lost,
-                "highest_seq_no": as_int(
-                    event.get(prefix + "Highest-Sequence-Number-Received")
-                ),
-                "lsr": as_int(event.get(prefix + "LSR")),
-                "ia_jitter": as_float(event.get(prefix + "Jitter")),
-                "dlsr": as_int(event.get(prefix + "DLSR")),
-            }
-        ],
-        "sender_information": {
-            "packets": packets,
+        "report_count": len(report_blocks),
+        "report_blocks": report_blocks,
+    }
+    if packet_type == 200:
+        payload["sender_information"] = {
+            "packets": as_int(event.get("Sender-Packet-Count")),
             "ntp_timestamp_sec": as_int(event.get("NTP-Most-Significant-Word")),
             "ntp_timestamp_usec": as_int(event.get("NTP-Least-Significant-Word")),
             "rtp_timestamp": as_int(event.get("RTP-Timestamp")),
-            "octets": octets,
-        },
-    }
+            "octets": as_int(event.get("Octect-Packet-Count")),
+        }
+    return payload
 
 
 def media_direction(event_name: str, state: CallState) -> Tuple[str, int, str, int]:
@@ -432,8 +509,13 @@ def event_timestamp(event: Dict[str, str]) -> int:
 
 
 def handle_event(
-    event: Dict[str, str], cache: CallCache, sender: HEPSender, config: Config
+    event: Dict[str, str],
+    cache: CallCache,
+    sender: HEPSender,
+    config: Config,
+    diagnostics: Optional[Diagnostics] = None,
 ) -> bool:
+    diagnostics = diagnostics or Diagnostics()
     event_name = event.get("Event-Name", "")
     if event_name in CHANNEL_EVENTS:
         cache.update(event)
@@ -443,11 +525,19 @@ def handle_event(
         return False
     if event_name not in RTCP_EVENTS:
         return False
+    diagnostics.rtcp_events += 1
+    if event_name == "RECV_RTCP_MESSAGE":
+        diagnostics.recv_events += 1
+    else:
+        diagnostics.send_events += 1
     if not event.get("Unique-ID"):
+        diagnostics.skipped_missing_uuid += 1
         return False
 
-    correlation_id, state = cache.resolve(event)
-    payload = rtcp_payload(event, state)
+    correlation_id, state, fallback = cache.resolve(event)
+    if fallback:
+        diagnostics.correlation_fallbacks += 1
+    payload = rtcp_payload(event, diagnostics)
     if payload is None:
         return False
     source_ip, source_port, destination_ip, destination_port = media_direction(
@@ -464,7 +554,17 @@ def handle_event(
         correlation_id,
         event_timestamp(event),
     )
-    sender.send(message)
+    try:
+        sender.send(message)
+    except OSError:
+        diagnostics.hep_send_failed += 1
+        raise
+    diagnostics.hep_sent += 1
+    diagnostics.report_blocks_sent += len(payload["report_blocks"])
+    if event_name == "RECV_RTCP_MESSAGE":
+        diagnostics.pbx_to_peer_sent += 1
+    else:
+        diagnostics.peer_to_pbx_sent += 1
     return True
 
 
@@ -485,7 +585,12 @@ def expect_reply(reader: ESLReader, expected: str) -> None:
         raise ConnectionError(f"ESL command failed: {headers.get('Reply-Text', 'no reply')}")
 
 
-def consume_esl(config: Config, password: str, sender: HEPSender) -> None:
+def consume_esl(
+    config: Config,
+    password: str,
+    sender: HEPSender,
+    diagnostics: Diagnostics,
+) -> None:
     cache = CallCache()
     with socket.create_connection((config.esl_host, config.esl_port), timeout=10) as connection:
         connection.settimeout(90)
@@ -508,8 +613,12 @@ def consume_esl(config: Config, password: str, sender: HEPSender) -> None:
             if headers.get("Content-Type") != "text/event-plain":
                 continue
             event = parse_headers(body)
+            if event.get("Event-Name") == "HEARTBEAT":
+                diagnostics.log_summary()
+                cache.expire()
+                continue
             try:
-                if handle_event(event, cache, sender, config):
+                if handle_event(event, cache, sender, config, diagnostics):
                     sent += 1
                     if sent == 1:
                         LOG.info("forwarded first correlated RTCP report to HOMER")
@@ -517,8 +626,7 @@ def consume_esl(config: Config, password: str, sender: HEPSender) -> None:
                         LOG.info("forwarded %d RTCP reports", sent)
             except OSError as error:
                 LOG.warning("HEP send failed; report dropped: %s", error)
-            if sent % 100 == 0:
-                cache.expire()
+        diagnostics.log_summary(force=True)
 
 
 def stop_handler(_signum: int, _frame: object) -> None:
@@ -541,10 +649,11 @@ def main() -> int:
         return 2
 
     sender = HEPSender(config)
+    diagnostics = Diagnostics()
     backoff = 1
     while not STOP:
         try:
-            consume_esl(config, password, sender)
+            consume_esl(config, password, sender, diagnostics)
             backoff = 1
         except (ConnectionError, OSError, ValueError) as error:
             if STOP:

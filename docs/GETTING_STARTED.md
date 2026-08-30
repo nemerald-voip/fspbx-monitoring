@@ -67,7 +67,7 @@ multiple PBXs, persistence, verification, IPv6, nftables, and rollback.
 
 ### Fast path
 
-The current development branch can be installed with one command:
+The current development branch can be installed or reapplied with one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/install.sh | sudo sh
@@ -76,6 +76,12 @@ curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main
 The installer prints the generated HOMER and Grafana passwords once. Save them
 in a password manager. They also remain in `/opt/monitoring/.env`, readable only
 by root by default.
+
+If `/opt/monitoring` already exists, the same command performs an in-place
+update. It preserves `.env`, local Prometheus targets, local Alertmanager
+routing, untracked operator files, and named-volume data. See
+[Update the deployment](OPERATIONS.md#update-the-deployment) for the exact
+replacement, cleanup, revision, and rollback behavior.
 
 At the time this guide was written, no stable release tag had been published.
 Once releases exist, use a pinned tag instead of `main`, for example:

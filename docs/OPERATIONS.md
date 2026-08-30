@@ -228,6 +228,8 @@ grep -RIn 'rtcp-audio-interval-msec' /etc/freeswitch/sip_profiles
 grep -RIn 'fire_rtcp_events' /etc/freeswitch/dialplan
 systemctl status freeswitch-rtcp-to-hep.service --no-pager
 journalctl -u freeswitch-rtcp-to-hep.service -n 100 --no-pager
+journalctl -u freeswitch-rtcp-to-hep.service \
+  --since '10 minutes ago' --no-pager | grep 'diagnostics '
 ```
 
 The journal should confirm a connection to `127.0.0.1:8021`. Authentication
@@ -243,7 +245,10 @@ inbound/A-leg SIP transaction: the reporter uses its Call-ID as the canonical
 QoS correlation key for every FreeSWITCH media leg. A reporter upgrade affects
 new reports only and does not regroup historical HOMER data. Follow
 [Centralized RTP/RTCP quality](RTP_QUALITY.md) for SRTCP handling, correlation,
-and direction interpretation.
+direction interpretation, cumulative field semantics, HOMER graph limits, and
+the diagnostic counter definitions. A carrier-facing `send` count without a
+matching `recv` count is evidence to investigate carrier RTCP, SDP ports,
+RTCP-mux, and NAT/firewall behavior separately from Call-ID correlation.
 
 ## Reboot behavior
 
@@ -269,15 +274,40 @@ implicitly as part of configuration acceptance.
 ## Update the deployment
 
 The installed application directory is a deployed copy, not necessarily a Git
-checkout. Update by rerunning the installer at a reviewed branch or release:
+checkout. The same one-line command used for a new installation is also the
+supported in-place update command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/install.sh | sudo sh
 ```
 
-The installer preserves `.env` and existing Prometheus target files. It copies
-new tracked application files, validates, pulls changed images, and reconciles
-the stack.
+On every run, the installer:
+
+1. Downloads the selected branch or release into a temporary directory.
+2. Validates its Compose model before changing `/opt/monitoring`.
+3. Overwrites repository-managed files with the selected revision.
+4. Removes only obsolete paths listed by the previous `.installed-files`
+   manifest; it does not recursively clean the deployment directory.
+5. Preserves `.env`, `prometheus/targets/*.yml`,
+   `alertmanager/alertmanager.local.yml`, backups, captures, data directories,
+   and other untracked operator files.
+6. Records the source, requested reference, and exact Git revision in
+   `.installed-version`.
+7. Validates the configured deployment, pulls pinned images, and runs
+   `docker compose up -d --remove-orphans`.
+
+Compose recreates services whose image or declaration changed and leaves
+unchanged containers running. Named volumes are not deleted. Review the result:
+
+```bash
+cat /opt/monitoring/.installed-version
+cd /opt/monitoring
+docker compose ps
+```
+
+This central update does not modify reporters or exporters installed on PBX
+hosts. Rerun the relevant PBX-side installer on each PBX when those components
+change.
 
 For production, prefer a release tag once one is available:
 
@@ -293,6 +323,11 @@ Before upgrading:
 3. Review Compose and configuration diffs.
 4. Change one major component at a time when possible.
 5. Confirm disk headroom for image and migration work.
+
+To roll application files back, rerun the installer with a previously reviewed
+release tag. This does not by itself reverse a container application's data
+migration; use that component's tested backup and restore procedure when a
+release changes a storage schema.
 
 Never switch production image references to floating `latest` tags.
 

@@ -17,7 +17,7 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [options]
 
-Install the FreeSWITCH monitoring stack on a Debian server.
+Install or update the FreeSWITCH monitoring stack on a Debian server.
 
 Options:
   --repo OWNER/REPOSITORY  Public GitHub repository to download
@@ -160,8 +160,18 @@ if [ "$install_docker" = true ]; then
       dpkg-query -W -f='${db:Status-Status}' docker-compose-plugin 2>/dev/null | \
       grep -q '^installed$'; then
     log "Docker Engine and the Compose plugin are already installed"
-    apt-get update
-    apt-get install -y ca-certificates curl git openssl tar
+    prerequisites_present=true
+    for package in ca-certificates curl git openssl tar; do
+      if ! dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | \
+          grep -q '^installed$'; then
+        prerequisites_present=false
+        break
+      fi
+    done
+    if [ "$prerequisites_present" = false ]; then
+      apt-get update
+      apt-get install -y ca-certificates curl git openssl tar
+    fi
   else
     install_docker_ce
   fi
@@ -177,7 +187,11 @@ docker info >/dev/null
 docker compose version >/dev/null
 
 cleanup_dir=
+managed_manifest_tmp=
 cleanup() {
+  if [ -n "$managed_manifest_tmp" ]; then
+    rm -f -- "$managed_manifest_tmp"
+  fi
   if [ -n "$cleanup_dir" ] && [ -d "$cleanup_dir" ]; then
     rm -rf -- "$cleanup_dir"
   fi
@@ -195,29 +209,91 @@ if [ -z "$source_dir" ]; then
   log "Downloading $repository at $version"
   git clone --quiet --depth 1 --branch "$version" \
     "https://github.com/$repository.git" "$source_dir"
+  source_label=$repository
 else
   case "$source_dir" in
     /*) ;;
     *) source_dir=$(CDPATH='' cd -- "$source_dir" && pwd) ;;
   esac
+  source_label="local:$source_dir"
 fi
+
+source_revision=$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)
+if [ -n "$source_revision" ] && \
+    ! git -C "$source_dir" diff-index --quiet HEAD -- 2>/dev/null; then
+  source_revision=$source_revision-dirty
+fi
+[ -n "$source_revision" ] || source_revision=unknown
 
 [ -f "$source_dir/compose.yaml" ] || die "compose.yaml is missing from $source_dir"
 [ -f "$source_dir/.env.example" ] || die ".env.example is missing from $source_dir"
 [ -f "$source_dir/systemd/monitoring-reconcile.service" ] || \
   die "monitoring-reconcile.service is missing from $source_dir"
 
+log "Validating source Compose model before deployment"
+(
+  cd "$source_dir"
+  docker compose --env-file .env.example config --quiet
+)
+
+managed_manifest_tmp=$(mktemp)
+if git -C "$source_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$source_dir" ls-files >"$managed_manifest_tmp"
+elif [ -f "$source_dir/.installed-files" ]; then
+  cp "$source_dir/.installed-files" "$managed_manifest_tmp"
+else
+  (
+    cd "$source_dir"
+    find . \
+      \( -path './.git' -o -path './.env' -o -path './.installed-*' \
+         -o -path './prometheus/targets' -o -path './backups' \
+         -o -path './data' -o -path './alertmanager/alertmanager.local.yml' \
+         -o -name '__pycache__' -o -name '*.pyc' -o -name '*.pcap' \
+         -o -name '*.pcapng' \) -prune -o \
+      \( -type f -o -type l \) -print | LC_ALL=C sort
+  ) >"$managed_manifest_tmp"
+fi
+
+while IFS= read -r managed_path; do
+  case "$managed_path" in
+    ''|/*|..|../*|*/../*|*/..) die "unsafe managed path: $managed_path" ;;
+  esac
+done <"$managed_manifest_tmp"
+
+if [ -f "$install_dir/.installed-version" ]; then
+  previous_version=$(tr '\n' ' ' <"$install_dir/.installed-version")
+  log "Updating $install_dir from ${previous_version% }"
+else
+  log "Installing a new deployment in $install_dir"
+fi
+
 if [ "$source_dir" != "$install_dir" ]; then
-  log "Installing application files in $install_dir"
+  log "Refreshing managed application files in $install_dir"
   install -d -m 0755 "$install_dir"
   (
     cd "$source_dir"
-    tar --exclude=.git --exclude=.env --exclude=.installed-version -cf - .
+    tar --verbatim-files-from --no-unquote -cf - -T "$managed_manifest_tmp"
   ) | (
     cd "$install_dir"
     tar -xf -
   )
 fi
+
+if [ -f "$install_dir/.installed-files" ]; then
+  while IFS= read -r managed_path; do
+    case "$managed_path" in
+      ''|/*|..|../*|*/../*|*/..) die "unsafe installed manifest path: $managed_path" ;;
+    esac
+    if ! grep -Fqx -- "$managed_path" "$managed_manifest_tmp"; then
+      obsolete_path=$install_dir/$managed_path
+      if [ -f "$obsolete_path" ] || [ -L "$obsolete_path" ]; then
+        rm -f -- "$obsolete_path"
+      fi
+    fi
+  done <"$install_dir/.installed-files"
+fi
+
+install -m 0644 "$managed_manifest_tmp" "$install_dir/.installed-files"
 
 install -d -m 0755 "$install_dir/prometheus/targets"
 for example in "$install_dir"/prometheus/targets.example/*.yml; do
@@ -237,7 +313,11 @@ rm -f "$unit_tmp"
 systemctl daemon-reload
 systemctl enable monitoring-reconcile.service
 
-printf '%s\n' "$version" >"$install_dir/.installed-version"
+{
+  printf 'source=%s\n' "$source_label"
+  printf 'reference=%s\n' "$version"
+  printf 'revision=%s\n' "$source_revision"
+} >"$install_dir/.installed-version"
 chmod 0644 "$install_dir/.installed-version"
 
 if [ "$generate_secrets" = true ] && [ ! -e "$install_dir/.env" ]; then
@@ -261,8 +341,9 @@ else
   log "Stack launch skipped"
 fi
 
-log "Installation complete"
+log "Installation/update complete"
 echo "Deployment directory: $install_dir"
+echo "Installed revision: $source_revision"
 echo "Boot reconciler: monitoring-reconcile.service (enabled)"
 if [ "$start_stack" = false ]; then
   echo "To launch later: cd $install_dir && ./scripts/init-secrets.sh && docker compose up -d"
