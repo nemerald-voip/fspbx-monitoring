@@ -9,6 +9,7 @@ repository=${MONITORING_REPOSITORY:-$default_repository}
 version=${MONITORING_VERSION:-$default_version}
 source_dir=${MONITORING_SOURCE_DIR:-}
 systemd_unit_dir=${MONITORING_SYSTEMD_UNIT_DIR:-/etc/systemd/system}
+os_release_file=${MONITORING_OS_RELEASE_FILE:-/etc/os-release}
 install_docker=true
 generate_secrets=true
 start_stack=true
@@ -98,9 +99,10 @@ case "$install_dir" in
   *'|'*|*'&'*) die "--install-dir cannot contain | or &" ;;
 esac
 
-[ -r /etc/os-release ] || die "/etc/os-release is missing"
-# shellcheck disable=SC1091
-. /etc/os-release
+[ -r "$os_release_file" ] || die "$os_release_file is missing"
+# The path is fixed in production and overridden only by the isolated test.
+# shellcheck disable=SC1090
+. "$os_release_file"
 [ "${ID:-}" = debian ] || die "this installer supports Debian; detected ${ID:-unknown}"
 case "${VERSION_CODENAME:-}" in
   trixie|bookworm|bullseye) ;;

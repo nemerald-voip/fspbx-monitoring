@@ -13,6 +13,7 @@ install_dir=$test_root/deployment
 unit_dir=$test_root/systemd
 fake_bin=$test_root/bin
 tracked_files=$test_root/tracked-files
+os_release_file=$test_root/os-release
 
 install -d -m 0755 "$source_dir" "$install_dir" "$unit_dir" "$fake_bin"
 git -C "$project_dir" ls-files >"$tracked_files"
@@ -46,6 +47,7 @@ exit 0
 EOF
 chmod 0755 "$fake_bin/id" "$fake_bin/ps" "$fake_bin/systemctl" \
   "$fake_bin/docker"
+printf 'ID=debian\nVERSION_CODENAME=bookworm\n' >"$os_release_file"
 
 install -d -m 0755 "$source_dir/prometheus/targets" \
   "$source_dir/alertmanager" "$source_dir/backups" "$source_dir/data" \
@@ -67,6 +69,7 @@ printf '%s\n' preserved-user-file >"$install_dir/operator-notes.txt"
 
 run_installer() {
   PATH="$fake_bin:$PATH" \
+    MONITORING_OS_RELEASE_FILE="$os_release_file" \
     MONITORING_SYSTEMD_UNIT_DIR="$unit_dir" \
     "$source_dir/install.sh" \
       --source-dir "$source_dir" \
