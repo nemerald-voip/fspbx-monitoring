@@ -3,7 +3,8 @@
 This procedure sends FreeSWITCH's parsed RTCP quality events to HOMER on MON01.
 The PBX-side reporter connects to the local Event Socket Layer (ESL), converts
 `RECV_RTCP_MESSAGE` and `SEND_RTCP_MESSAGE` events to HEP type 5 JSON, and
-correlates them to the SIP Call-ID for HOMER's transaction **QoS** tab.
+correlates every FreeSWITCH channel in a logical call to one canonical SIP
+Call-ID for HOMER's transaction **QoS** tab.
 
 The reporter does not capture packets, inspect RTP audio, retain media, or read
 SRTP keys. It is outside the call path: if the reporter or MON01 fails, quality
@@ -47,6 +48,27 @@ Not every endpoint sends receiver reports. When only FreeSWITCH reports are
 available, remote-to-PBX media is measured but PBX-to-remote delivery is not.
 Missing peer reports, bypass media, and missing media variables can leave a
 direction absent or reduce address detail.
+
+## Correlation across FreeSWITCH SIP legs
+
+FreeSWITCH is a back-to-back user agent: an A-leg and its originated B-leg
+normally have different SIP Call-IDs even though they belong to one call. HOMER
+queries the QoS tab by one exact HEP correlation ID, so sending each media leg
+under its own SIP Call-ID splits the quality view between transactions.
+
+The reporter uses FreeSWITCH's `Channel-Call-UUID` to group the channels. It
+selects the original inbound leg's SIP Call-ID as the canonical ID and sends
+RTCP from every grouped leg under that value. For an unbridged or entirely
+outbound call, it uses the first available SIP Call-ID. Open the original
+inbound/A-leg SIP transaction in HOMER to see all available media directions;
+a separately opened B-leg transaction is not expected to repeat the same QoS
+records.
+
+Correlation changes apply only to newly ingested reports. HOMER does not
+rewrite historical RTCP records. If the reporter starts in the middle of an
+active call before it has observed the inbound channel, its earliest reports
+may use the available leg's SIP Call-ID; later reports use the inbound ID once
+that channel is observed.
 
 ## Design and resource profile
 
@@ -196,7 +218,8 @@ sudo tcpdump -n -q -i any \
 In HOMER:
 
 1. Find the test call and open its transaction.
-2. Open **QoS** and look for correlated RTCP reports.
+2. Open the original inbound/A-leg transaction, then open **QoS** and look for
+   every available FreeSWITCH media leg under that one transaction.
 3. Inspect report direction before interpreting loss or jitter.
 4. Confirm phone-facing SRTCP reports produce plausible values rather than the
    arbitrary values seen when encrypted report blocks are decoded as plaintext.
@@ -263,6 +286,11 @@ An ESL authentication error means the root-only credential does not match
 RTCP is not active on that leg or no peer report arrived. `RECV_RTCP_MESSAGE`
 can still cover peer-generated reports without `fire_rtcp_events`; missing
 `SEND_RTCP_MESSAGE` specifically points to the channel variable or its timing.
+
+If the phone-facing and carrier-facing reports are split between the two SIP
+Call-IDs, confirm the PBX runs a reporter version with canonical
+`Channel-Call-UUID` correlation. After upgrading, place a new call: existing
+HOMER records remain under the correlation IDs with which they were ingested.
 
 Stop the reporter without affecting FreeSWITCH:
 

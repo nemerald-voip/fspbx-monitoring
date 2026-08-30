@@ -69,6 +69,8 @@ class AgentTests(unittest.TestCase):
         cache.update(
             {
                 "Unique-ID": "a-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "inbound",
                 "variable_sip_call_id": "call@example.net",
                 "variable_local_media_ip": "192.0.2.10",
                 "variable_remote_media_ip": "198.51.100.20",
@@ -76,9 +78,81 @@ class AgentTests(unittest.TestCase):
                 "variable_remote_media_port": "30000",
             }
         )
-        cache.update({"Unique-ID": "b-leg", "Other-Leg-Unique-ID": "a-leg"})
+        cache.update(
+            {
+                "Unique-ID": "b-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "outbound",
+                "Other-Leg-Unique-ID": "a-leg",
+            }
+        )
         correlation_id, _ = cache.resolve({"Unique-ID": "b-leg"})
         self.assertEqual(correlation_id, "call@example.net")
+
+    def test_cache_uses_one_canonical_call_id_for_both_sip_legs(self):
+        cache = AGENT.CallCache()
+        cache.update(
+            {
+                "Unique-ID": "a-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "inbound",
+                "Other-Leg-Unique-ID": "b-leg",
+                "variable_sip_call_id": "phone-call-id",
+            }
+        )
+        cache.update(
+            {
+                "Unique-ID": "b-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "outbound",
+                "Other-Leg-Unique-ID": "a-leg",
+                "variable_sip_call_id": "carrier-call-id",
+            }
+        )
+
+        a_call_id, _ = cache.resolve({"Unique-ID": "a-leg"})
+        b_call_id, _ = cache.resolve({"Unique-ID": "b-leg"})
+
+        self.assertEqual(a_call_id, "phone-call-id")
+        self.assertEqual(b_call_id, "phone-call-id")
+
+    def test_cache_promotes_late_inbound_call_id_for_call_group(self):
+        cache = AGENT.CallCache()
+        cache.update(
+            {
+                "Unique-ID": "b-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "outbound",
+                "variable_sip_call_id": "carrier-call-id",
+            }
+        )
+        cache.update(
+            {
+                "Unique-ID": "a-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "inbound",
+                "variable_sip_call_id": "phone-call-id",
+            }
+        )
+
+        correlation_id, _ = cache.resolve({"Unique-ID": "b-leg"})
+
+        self.assertEqual(correlation_id, "phone-call-id")
+
+    def test_cache_uses_own_call_id_for_unbridged_channel(self):
+        cache = AGENT.CallCache()
+        cache.update(
+            {
+                "Unique-ID": "single-leg",
+                "Channel-Call-UUID": "single-leg",
+                "Call-Direction": "outbound",
+                "variable_sip_call_id": "single-call-id",
+            }
+        )
+
+        correlation_id, _ = cache.resolve({"Unique-ID": "single-leg"})
+
+        self.assertEqual(correlation_id, "single-call-id")
 
     def test_rtcp_payload_converts_cumulative_values_to_intervals(self):
         state = AGENT.CallState(recv_packets=90, recv_octets=9000, recv_lost=2)
@@ -173,6 +247,45 @@ class AgentTests(unittest.TestCase):
         payload = json.loads(chunks[15])
         self.assertEqual(payload["ssrc"], 0xA1B2C3D4)
         self.assertEqual(payload["report_blocks"][0]["source_ssrc"], 0x11223344)
+
+    def test_handle_event_sends_both_legs_under_inbound_call_id(self):
+        config = AGENT.Config(
+            "127.0.0.1", 8021, "192.0.2.50", 9060, "udp", 1000, "pbx-1"
+        )
+        cache = AGENT.CallCache()
+        sender = FakeSender()
+        cache.update(
+            {
+                "Unique-ID": "a-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "inbound",
+                "variable_sip_call_id": "phone-call-id",
+            }
+        )
+        cache.update(
+            {
+                "Unique-ID": "b-leg",
+                "Channel-Call-UUID": "call-group",
+                "Call-Direction": "outbound",
+                "variable_sip_call_id": "carrier-call-id",
+            }
+        )
+        for unique_id in ("a-leg", "b-leg"):
+            sent = AGENT.handle_event(
+                {
+                    "Event-Name": "SEND_RTCP_MESSAGE",
+                    "Unique-ID": unique_id,
+                    "SSRC": "a1b2c3d4",
+                    "Source-SSRC": "11223344",
+                },
+                cache,
+                sender,
+                config,
+            )
+            self.assertTrue(sent)
+
+        correlation_ids = [decode_chunks(message)[17] for message in sender.messages]
+        self.assertEqual(correlation_ids, [b"phone-call-id", b"phone-call-id"])
 
     def test_config_rejects_non_loopback_esl(self):
         config = AGENT.Config(

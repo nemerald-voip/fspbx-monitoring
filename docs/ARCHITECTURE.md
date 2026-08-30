@@ -123,11 +123,14 @@ nonzero unsigned 32-bit ID for each hostname. Each server in a redundant system
 still receives its own ID so HOMER can distinguish the nodes.
 
 The PBX-side RTCP reporter consumes FreeSWITCH's parsed RTCP and channel events
-through loopback-only ESL, correlates them to SIP Call-IDs, and sends HEP type 5
-JSON to HOMER. FreeSWITCH authenticates and decrypts SRTCP before publishing the
-event, so the reporter needs neither packet capture privileges nor media keys.
-It sends no SIP or RTP payload and has no disk queue. HOMER stores correlated
-quality reports centrally in `homer_data`; see
+through loopback-only ESL. It groups B2BUA channels by `Channel-Call-UUID`,
+assigns their reports to the original inbound leg's canonical SIP Call-ID, and
+sends HEP type 5 JSON to HOMER. This places phone-facing and carrier-facing
+quality under one A-leg QoS view instead of splitting it between SIP dialogs.
+FreeSWITCH authenticates and decrypts SRTCP before publishing the event, so the
+reporter needs neither packet capture privileges nor media keys. It sends no
+SIP or RTP payload and has no disk queue. HOMER stores correlated quality
+reports centrally in `homer_data`; see
 [Centralized RTP/RTCP quality](RTP_QUALITY.md).
 
 The reporter runs as a dynamic unprivileged user with no capabilities. Low CPU

@@ -165,7 +165,10 @@ sudo ./rtcp-quality/install.sh --monitoring-ip MON01_IP
 The reporter reads parsed RTCP events from loopback-only ESL. FreeSWITCH has
 already authenticated and decrypted SRTCP, so no SRTP keys or media payloads
 leave the process. Reports go to HOMER over the same HEP 9060 allowlist and
-populate the transaction **QoS** view. Read the complete
+populate the original inbound/A-leg transaction's **QoS** view. The reporter
+groups FreeSWITCH B2BUA channels by `Channel-Call-UUID` and uses that A-leg SIP
+Call-ID for phone-facing and carrier-facing reports, rather than splitting QoS
+between the two SIP dialogs. Read the complete
 [centralized RTP/RTCP procedure](../docs/RTP_QUALITY.md), including its
 directional-loss interpretation, ESL credential handling, resource limits, and
 RTCP-off/RTCP-on media canary before rollout.

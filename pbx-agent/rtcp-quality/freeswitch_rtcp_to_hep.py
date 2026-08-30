@@ -156,6 +156,8 @@ class Config:
 @dataclass
 class CallState:
     call_id: str = ""
+    call_uuid: str = ""
+    direction: str = ""
     other_leg: str = ""
     local_ip: str = "127.0.0.1"
     remote_ip: str = "127.0.0.1"
@@ -170,10 +172,30 @@ class CallState:
     updated_at: float = 0.0
 
 
+@dataclass
+class CallGroup:
+    correlation_id: str = ""
+    priority: int = 0
+    updated_at: float = 0.0
+
+
 class CallCache:
     def __init__(self, ttl_seconds: int = 86400) -> None:
         self.states: Dict[str, CallState] = {}
+        self.groups: Dict[str, CallGroup] = {}
         self.ttl_seconds = ttl_seconds
+
+    def update_group(self, state: CallState, now: float) -> None:
+        if not state.call_uuid or not state.call_id:
+            return
+        group = self.groups.setdefault(state.call_uuid, CallGroup())
+        # B2BUA legs have distinct SIP Call-IDs. Prefer the original inbound
+        # leg, but let its ID supersede a provisional outbound ID seen first.
+        priority = 2 if state.direction == "inbound" else 1
+        if not group.correlation_id or priority > group.priority:
+            group.correlation_id = state.call_id
+            group.priority = priority
+        group.updated_at = now
 
     def update(self, event: Dict[str, str], now: Optional[float] = None) -> None:
         unique_id = event.get("Unique-ID", "")
@@ -181,6 +203,12 @@ class CallCache:
             return
         state = self.states.setdefault(unique_id, CallState())
         state.call_id = event.get("variable_sip_call_id") or state.call_id
+        state.call_uuid = (
+            event.get("Channel-Call-UUID")
+            or event.get("variable_call_uuid")
+            or state.call_uuid
+        )
+        state.direction = event.get("Call-Direction") or state.direction
         state.other_leg = event.get("Other-Leg-Unique-ID") or state.other_leg
         state.local_ip = event.get("variable_local_media_ip") or state.local_ip
         state.remote_ip = event.get("variable_remote_media_ip") or state.remote_ip
@@ -191,19 +219,24 @@ class CallCache:
             event.get("variable_remote_media_port"), state.remote_port
         )
         state.updated_at = time.monotonic() if now is None else now
+        self.update_group(state, state.updated_at)
 
     def resolve(self, event: Dict[str, str]) -> Tuple[str, CallState]:
         unique_id = event.get("Unique-ID", "")
-        state = self.states.setdefault(unique_id, CallState())
-        state.updated_at = time.monotonic()
+        self.update(event)
+        state = self.states[unique_id]
         other_leg = event.get("Other-Leg-Unique-ID") or state.other_leg
         other_state = self.states.get(other_leg)
-        call_id = (
-            (other_state.call_id if other_state else "")
-            or state.call_id
-            or event.get("variable_sip_call_id", "")
-            or unique_id
-        )
+        group = self.groups.get(state.call_uuid)
+        if group and group.correlation_id:
+            call_id = group.correlation_id
+        elif state.direction == "inbound" and state.call_id:
+            call_id = state.call_id
+        elif other_state and other_state.direction == "inbound" and other_state.call_id:
+            call_id = other_state.call_id
+        else:
+            call_id = state.call_id or (other_state.call_id if other_state else "")
+            call_id = call_id or event.get("variable_sip_call_id", "") or unique_id
         return call_id, state
 
     def remove(self, event: Dict[str, str]) -> None:
@@ -218,6 +251,13 @@ class CallCache:
         ]
         for key in expired:
             self.states.pop(key, None)
+        expired_groups = [
+            key
+            for key, group in self.groups.items()
+            if current - group.updated_at > self.ttl_seconds
+        ]
+        for key in expired_groups:
+            self.groups.pop(key, None)
 
 
 def counter_delta(current: int, previous: int) -> int:

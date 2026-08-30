@@ -238,7 +238,10 @@ one-line password file.
 Place a call lasting at least 15 seconds. Missing remote reports can leave
 PBX-to-remote loss unmeasured even when FreeSWITCH's own reports are present.
 Missing `SEND_RTCP_MESSAGE` events point to `fire_rtcp_events` not being set
-before media activation. Follow
+before media activation. For a bridged B2BUA call, open the original
+inbound/A-leg SIP transaction: the reporter uses its Call-ID as the canonical
+QoS correlation key for every FreeSWITCH media leg. A reporter upgrade affects
+new reports only and does not regroup historical HOMER data. Follow
 [Centralized RTP/RTCP quality](RTP_QUALITY.md) for SRTCP handling, correlation,
 and direction interpretation.
 
