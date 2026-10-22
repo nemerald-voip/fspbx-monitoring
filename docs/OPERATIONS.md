@@ -59,7 +59,32 @@ Configured-host validation:
 The configured check rejects missing `.env`, placeholder credentials, a missing
 Compose plugin, and an invalid Compose model.
 
+## Add another FS PBX to HOMER
+
+On an existing MON01 with the HEP firewall service installed:
+
+1. On the new FS PBX, open **System Settings -> SIP Capture**, enable capture,
+   use the working node's collector address/transport and port `9060`, select
+   the SIP profiles, and **Save**. A numeric **Capture ID** should appear.
+2. On MON01, edit `/etc/fs-monitoring/hep-firewall.env` and append the new PBX
+   source IP with `/32` to `ALLOWED_HEP_SOURCES`, preserving existing entries.
+3. Run `sudo systemctl restart fspbx-hep-firewall.service` on MON01.
+
+The [three-step setup guide](../pbx-agent/README.md#add-another-fs-pbx-to-an-existing-homer)
+lists the screen fields and an allowlist example. If a provider firewall also
+restricts HEP, add the source there too. Make a new test call and check HOMER;
+use [troubleshooting](#sip-is-absent-from-homer) only if it does not appear.
+
+For call-quality stats, also complete
+[Enable RTCP quality stats on the new node](../pbx-agent/README.md#enable-rtcp-quality-stats-on-the-new-node):
+enable `rtcp-audio-interval-msec=5000`, export `fire_rtcp_events=true` before
+media, and install the reporter on that PBX. It reuses the same HEP allowlist.
+Verify a new call in HOMER's **QoS** tab; SIP capture alone does not enable it.
+
 ## Add or change PBX targets
+
+These inventories configure metrics and endpoint probes. They do not enable
+SIP capture in HOMER or file-log delivery to Loki.
 
 Edit the ignored local inventories:
 
@@ -173,6 +198,12 @@ availability before recreating data.
 
 ### SIP is absent from HOMER
 
+Start on the affected physical FS PBX's **System Settings -> SIP Capture** page.
+If **Capture ID** says **Assigned when saved**, enable capture, select at least
+one relevant profile, and save on that server. An enabled toggle or settings
+visible through database replication alone do not prove local application.
+After saving, expect a numeric capture ID; delivery still needs verification.
+
 Trace the capture path in order so a local configuration success is not mistaken
 for successful HOMER delivery:
 
@@ -204,10 +235,40 @@ for successful HOMER delivery:
    collector, port, selected Sofia profiles, and the
    [native FS PBX setup](../pbx-agent/README.md#1-native-hep-capture).
 
-4. **MON01 ingest:** Confirm the PBX source is permitted by the provider and
-   Docker-aware host firewalls. Run a corresponding short, authorized capture
-   on MON01, then verify that the test call appears in HOMER under the PBX's
-   expected capture ID.
+4. **MON01 arrival and ingest:** You can start here when the PBX has no
+   `tcpdump`. Run this on MON01, replacing `PBX_SOURCE_IP` with the PBX's source
+   address as seen by MON01 (VPN address or NAT egress address), and make a test
+   call during the capture:
+
+   ```bash
+   sudo timeout 30s tcpdump -n -q -l -s 96 -i any -c 20 \
+     'src host PBX_SOURCE_IP and udp dst port 9060'
+   ```
+
+   Use `tcp` instead of `udp` when configured. This prints packet summaries
+   without saving a capture file and stops after 20 packets or 30 seconds.
+   `timeout` returning status 124 means the time limit was reached, not that
+   capture configuration failed. With `-i any`, the same packet can appear on
+   more than one interface; the count is not a count of calls.
+
+   Packets on MON01's external interface prove arrival at the host, but can
+   still be dropped by its Docker-aware firewall before reaching HOMER. When
+   the repository's HEP firewall helper is in use, inspect its active rules:
+
+   ```bash
+   sudo iptables -n -v -L DOCKER-USER --line-numbers
+   sudo iptables -n -v -L FSPBX-HEP --line-numbers
+   ```
+
+   The PBX source must match an `ACCEPT` rule before the HEP `DROP` rule. If it
+   is missing, follow [adding a PBX to the existing allowlist](FIREWALL.md#add-another-pbx-to-an-existing-allowlist)
+   through the authorized firewall change procedure, preserving existing
+   sources. No observed packets during this window is inconclusive without
+   known test traffic; check the source/NAT address, transport, collector,
+   routing, and provider firewall before assuming the PBX is not sending.
+
+   Finally, verify the new test call appears in HOMER under the PBX's expected
+   capture ID. Host arrival alone does not prove HOMER ingestion.
 
 A successful capture with `127.0.0.1` as the collector proves only persistence,
 runtime state, and local HEP generation. It does not prove network routing,
@@ -236,6 +297,15 @@ The journal should confirm a connection to `127.0.0.1:8021`. Authentication
 errors mean the root-only service credential no longer matches FreeSWITCH.
 Never solve that by exposing ESL remotely; rerun the installer with a protected
 one-line password file.
+
+Treat file matches as configuration clues, not runtime proof: a match only in
+`.xml.noload`, an entry marked `enabled="false"`, or a setting visible in the
+FS PBX editor does not confirm what an active call is using. Configuration can
+also be supplied dynamically rather than in those directories. Check reporter
+diagnostics during a new call and confirm its QoS records in HOMER. Received
+HEP type `5` messages prove RTCP traffic reaches MON01; SIP type `1` messages on
+the same port do not. Neither proves that every SIP profile has loaded the exact
+configured RTCP interval.
 
 Place a call lasting at least 15 seconds. Missing remote reports can leave
 PBX-to-remote loss unmeasured even when FreeSWITCH's own reports are present.

@@ -96,10 +96,22 @@ Then visit:
 - Grafana: `http://127.0.0.1:3000`
 - HOMER: `http://127.0.0.1:8080`
 
-Next, configure each PBX using the
-[native FS PBX SIP Capture workflow](pbx-agent/README.md#1-native-hep-capture)
-and the rest of the [PBX agent guide](pbx-agent/README.md), then add its private
-addresses under `/opt/monitoring/prometheus/targets/`.
+To add another FS PBX's SIP messages or call flows to HOMER, follow
+[Add another FS PBX to an existing HOMER](pbx-agent/README.md#add-another-fs-pbx-to-an-existing-homer).
+Save **System Settings -> SIP Capture** on each physical server; **Capture ID**
+must change from **Assigned when saved** to a numeric ID. On MON01, add the
+source IP to `ALLOWED_HEP_SOURCES` in `/etc/fs-monitoring/hep-firewall.env` and
+run `sudo systemctl restart fspbx-hep-firewall.service`. These steps assume the
+HEP firewall service is already installed. Verify a new test call in HOMER.
+
+For RTP/RTCP quality in HOMER's **QoS** tab, continue with
+[Enable RTCP quality stats on the new node](pbx-agent/README.md#enable-rtcp-quality-stats-on-the-new-node).
+It covers the FS PBX settings and the reporter to install on every physical PBX.
+
+For host/FreeSWITCH metrics, use the [PBX agent guide](pbx-agent/README.md) and add
+private addresses under `/opt/monitoring/prometheus/targets/`. For application
+and system log files in Grafana/Loki, use the separate
+[Alloy setup](pbx-agent/README.md#3-logs-with-grafana-alloy).
 
 ## Reboot behavior
 

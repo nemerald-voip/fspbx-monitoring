@@ -10,6 +10,10 @@ The reporter does not capture packets, inspect RTP audio, retain media, or read
 SRTP keys. It is outside the call path: if the reporter or MON01 fails, quality
 history is incomplete but calls continue normally.
 
+For the short new-node procedure, start with
+[Enable RTCP quality stats on the new node](../pbx-agent/README.md#enable-rtcp-quality-stats-on-the-new-node).
+This page provides the detailed behavior, diagnostics, and rollback procedure.
+
 ## Why ESL handles SRTCP safely
 
 An interface capture sees SRTCP headers but cannot trust the encrypted report
@@ -170,12 +174,19 @@ Use UI-managed settings so regeneration does not erase them. A Sofia profile
 restart can affect active calls and registrations, so schedule it in a
 maintenance window. The reporter installer never restarts FreeSWITCH.
 
-Verify the generated configuration:
+Inspect file-based configuration where applicable:
 
 ```bash
 grep -RIn 'rtcp-audio-interval-msec' /etc/freeswitch/sip_profiles
 grep -RIn 'fire_rtcp_events' /etc/freeswitch/dialplan
 ```
+
+These searches do not prove the running profiles loaded a setting. A match only
+in `.xml.noload` or with `enabled="false"` is not evidence of an active setting,
+and dynamically supplied configuration may not appear in these directories.
+Likewise, a value shown in the FS PBX editor is not runtime confirmation. Verify
+events during a new call using the reporter diagnostics below; do not restart a
+production profile solely because one of these searches returned no matches.
 
 During a test call, use `show channels` to obtain each UUID and confirm the
 variable is true:
@@ -263,6 +274,14 @@ In HOMER:
 
 Native SIP capture and this reporter intentionally share a capture ID. The
 reporter sends HEP type 5 only, so it cannot duplicate SIP messages.
+
+For a receiving-side check, use the
+[bounded MON01 capture procedure](OPERATIONS.md#sip-is-absent-from-homer).
+A UDP `9060` packet summary alone cannot distinguish SIP (HEP type `1`) from
+RTCP quality (type `5`). Confirm type `5` for the expected capture ID when using
+a HEP-aware decoder, and verify the new call's QoS records in HOMER. Receiving
+RTCP proves reporting for the observed calls, not that every profile uses the
+exact configured interval.
 
 The reporter writes a cumulative diagnostic summary to the journal roughly
 once per minute. Show only those summaries with:

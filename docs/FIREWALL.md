@@ -111,8 +111,34 @@ After changing the allowlist:
 
 ```bash
 sudoedit /etc/fs-monitoring/hep-firewall.env
-sudo systemctl reload fspbx-hep-firewall.service
+sudo systemctl restart fspbx-hep-firewall.service
 ```
+
+## Add another PBX to an existing allowlist
+
+Keep every previously allowed source and add the new PBX's source address as
+seen by MON01 (its VPN address or, when NAT is involved, the NAT egress address).
+Update the provider firewall and any host allowlist in use for the chosen HEP
+transport on port 9060.
+
+If the persistent `fspbx-hep-firewall.service` above is already installed, edit
+its existing environment file and append the new source with `/32` to
+`ALLOWED_HEP_SOURCES`, then restart the firewall service:
+
+```bash
+sudoedit /etc/fs-monitoring/hep-firewall.env
+sudo systemctl restart fspbx-hep-firewall.service
+```
+
+Do not copy the example environment file over the existing inventory. If using
+the helper directly, pass the full existing source list plus the new source:
+the helper replaces its dedicated chain's rules on each application. If no host
+helper is installed, update the existing provider/VPN controls rather than
+assuming this systemd service exists. These are firewall changes; apply them
+through the environment's authorized change procedure.
+
+Verify a new test call from the new PBX and continued capture from an existing
+PBX in HOMER. No HOMER container restart is needed for a source-allowlist update.
 
 ## Verify
 

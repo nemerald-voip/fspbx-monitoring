@@ -1,104 +1,154 @@
 # PBX-side agent setup
 
-Install these pieces on every FreeSWITCH host. The monitoring server must never
-be required for normal call processing; HEP, logs, and metrics are best-effort
-outbound telemetry.
+Configure the telemetry you need on each FreeSWITCH host. The monitoring server
+must never be required for normal call processing; HEP, logs, and metrics are
+best-effort outbound telemetry.
 
-Before changing a PBX, complete the central
-[new-server checklist](../docs/GETTING_STARTED.md), choose private/VPN addresses,
-and record these per-node values:
-
-| Value | Requirement |
-|---|---|
-| PBX name | Stable label used consistently in Grafana and Prometheus |
-| HEP capture ID | Unique numeric ID for this PBX |
-| MON01 address | Private/VPN address whenever possible |
-| ESL password | Long random local secret; never stored in this repository |
-| SIP and RTP ranges | Exact ranges used by this FreeSWITCH configuration |
-
-Apply one telemetry layer at a time and confirm that disabling it does not alter
-call processing.
+For SIP messages and call flows in HOMER, use the three steps below. This uses
+native FreeSWITCH capture. For HOMER's QoS statistics, continue with
+[Enable RTCP quality stats](#enable-rtcp-quality-stats-on-the-new-node).
+Alloy is only needed for separate
+[application and system log files in Grafana/Loki](#3-logs-with-grafana-alloy).
 
 ## 1. Native HEP capture
 
-### Configure current FS PBX systems
+### Add another FS PBX to an existing HOMER
 
-In FS PBX, open **System Settings -> SIP Capture**.
+These steps assume MON01 already runs HOMER and the persistent
+`fspbx-hep-firewall.service` allowlist. For a new monitoring host, complete
+[Getting started](../docs/GETTING_STARTED.md) first.
 
-1. Enable SIP capture.
-2. Select UDP unless the monitoring network requires TCP.
-3. Enter the reachable private/VPN address of the HOMER monitoring server.
-4. Keep port `9060` unless HOMER uses a different HEP port.
-5. Select the Sofia profiles to capture, normally `internal` and `external`.
-6. Confirm that **Current server** shows the expected FreeSWITCH hostname, then
-   save.
+**1. Configure and save SIP Capture on the new FS PBX.**
 
-FS PBX automatically:
+Open **System Settings -> SIP Capture**:
 
-- identifies the current physical server using its FreeSWITCH hostname;
-- creates a hostname-scoped `hep_capture_id` switch variable;
-- generates and persists a random, nonzero unsigned 32-bit capture ID scoped to
-  the current server's hostname;
-- stores the collector with `capture_id=$${hep_capture_id}`;
-- rebuilds the local `vars.xml`;
-- sets the live FreeSWITCH global variable;
-- regenerates the local Sofia configuration; and
-- rescans the selected profiles and enables capture without restarting them.
+| Field | Value |
+|---|---|
+| Enable SIP capture | On |
+| Transport | UDP, or the same transport as the working PBX |
+| Collector host | MON01's reachable address, as used on the working PBX; no protocol or port |
+| Collector port | `9060` unless your collector uses a custom port |
+| SIP profiles | `internal`, `external`, and any additional profiles you want captured |
+| Current server | Confirm this is the new node's hostname |
 
-HEP capture IDs are unsigned numeric identifiers. They identify physical
-FreeSWITCH servers in HOMER, not logical PBX systems. The monitoring server
-remains outside the live call path: losing HOMER or HEP connectivity does not
-interrupt calls or registrations.
+Click **Save on this node**. **Capture ID** should become a numeric value instead
+of **Assigned when saved**. FS PBX assigns each physical server its own ID;
+do not copy another node's ID. Saving applies capture without restarting Sofia
+profiles.
+
+**2. Add the new PBX's source IP to MON01's firewall environment file.**
+
+On MON01:
+
+```bash
+sudoedit /etc/fs-monitoring/hep-firewall.env
+```
+
+Append `NEW_PBX_IP/32` to `ALLOWED_HEP_SOURCES`, keeping every existing entry
+inside the quotes. Use the source IPv4 address MON01 sees (the PBX's public/NAT
+or VPN address). For example, with an existing source and one new source:
+
+```dotenv
+ALLOWED_HEP_SOURCES="203.0.113.10/32 198.51.100.24/32"
+```
+
+Those are documentation addresses; use your real addresses. This is
+`/etc/fs-monitoring/hep-firewall.env`, **not** `/opt/monitoring/.env`.
+If a provider firewall also restricts HEP, allow the new source there too.
+
+**3. Restart the HEP firewall service on MON01.**
+
+```bash
+sudo systemctl restart fspbx-hep-firewall.service
+```
+
+Make a new test call and check HOMER's recent time range for the new capture ID.
+If it is missing, use the [troubleshooting checks](../docs/OPERATIONS.md#sip-is-absent-from-homer).
+
+### Enable RTCP quality stats on the new node
+
+Complete the SIP capture steps above first, then do the following on **each
+physical FS PBX**. RTCP stats use a separate reporter service, but the same
+capture ID and HEP port `9060` allowlist; no additional MON01 port is needed.
+
+**1. Enable RTCP and its events in FS PBX.**
+
+For each SIP profile carrying media, open **Edit SIP Profile -> Settings** and
+save this setting:
+
+```text
+Name:    rtcp-audio-interval-msec
+Value:   5000
+Enabled: On
+```
+
+In the managed dialplan, add this action early in each applicable call path,
+before media starts (before answering, playback, or bridging):
+
+```text
+Application: export
+Data:        fire_rtcp_events=true
+```
+
+Use the FS PBX editors so configuration regeneration preserves the settings.
+If applying a SIP profile change requires a restart, use a maintenance window;
+it can affect calls and registrations.
+
+**2. Install the RTCP reporter on the new PBX.**
+
+Run these commands on the **PBX, not MON01**. Replace `MON01_IP` with the same
+collector address used on the SIP Capture page:
+
+```bash
+curl -fsSLo /tmp/install-freeswitch-rtcp-to-hep.sh \
+  https://raw.githubusercontent.com/nemerald-voip/fspbx-monitoring/main/pbx-agent/rtcp-quality/install.sh
+less /tmp/install-freeswitch-rtcp-to-hep.sh
+sudo sh /tmp/install-freeswitch-rtcp-to-hep.sh --monitoring-ip MON01_IP
+```
+
+This requires `fs_cli`, Python 3, and local ESL on `127.0.0.1:8021`. The installer
+detects the node name, native capture ID, and ESL credential, then starts and
+enables `freeswitch-rtcp-to-hep.service` for reboot. It does not enable the FS PBX
+settings in step 1 or restart FreeSWITCH. If using HEP over TCP, add
+`--transport tcp` to the installer command.
+
+**3. Verify a new call in HOMER.**
+
+Place a new call lasting at least 15 seconds. On the PBX, check:
+
+```bash
+systemctl status freeswitch-rtcp-to-hep.service --no-pager
+journalctl -u freeswitch-rtcp-to-hep.service --since '5 minutes ago' --no-pager
+```
+
+Look for `connected to local ESL and subscribed to RTCP events`. Diagnostic
+summaries appear about once per minute; `rtcp_events` and `hep_sent` should
+increase during calls. `send` counts PBX-generated reports and `recv` counts
+received peer reports. A running service or a setting visible in the UI alone
+does not prove reports are flowing.
+
+In HOMER, open the new call's **original inbound/A-leg transaction -> QoS** and
+confirm new quality reports are present. This verifies delivery; ordinary SIP
+traffic on port `9060` does not prove RTCP delivery. RTCP quality uses HEP type
+`5`, while SIP uses type `1`.
+
+For troubleshooting, legacy-sensor upgrades, and rollback, see the
+[full RTCP guide](../docs/RTP_QUALITY.md).
 
 ### Redundant FS PBX servers
 
-Configure the same collector on every server in the redundant system. Save the
-first server, allow its switch-variable database row to replicate, and then
-open and save **System Settings -> SIP Capture** on the next server. Repeat this
-sequence for every node.
-
-Each physical FreeSWITCH server must have its own capture ID, even when several
-servers form one redundant PBX system. Saving on each server is required because
-`vars.xml`, the live global variable, the generated Sofia cache, and the profile
-rescan are local to that server. Before saving each node, confirm that
-**Current server** displays its expected FreeSWITCH hostname.
+Repeat the SIP capture steps and install the RTCP reporter on each physical
+node where quality stats are required. After saving one node, let its
+switch-variable database row replicate before saving the next. Replicated
+settings alone do not apply capture locally: open and save the SIP Capture page
+on every node, checking **Current server** each time.
 
 ### Verify the PBX configuration
 
-Check the current server identity and live capture ID:
-
-```bash
-fs_cli -x 'switchname'
-fs_cli -x 'global_getvar hep_capture_id'
-```
-
-Check the persistent variable and confirm that the selected profiles remain
-running:
-
-```bash
-grep 'hep_capture_id' /etc/freeswitch/vars.xml
-fs_cli -x 'sofia status' | grep -E 'internal|external'
-```
-
-Confirm that the PBX emits HEP traffic, replacing `MONITORING_IP` first:
-
-```bash
-sudo tcpdump -n -q -i any \
-  'udp dst host MONITORING_IP and dst port 9060'
-```
-
-Use `tcp` instead of `udp` in the filter if TCP was selected. Place or receive a
-test call, then run a corresponding short capture on MON01 and confirm that the
-call appears in HOMER under the expected capture ID. This distinguishes local
-HEP generation from routing, firewall, and HOMER ingestion success.
-
-Using `127.0.0.1` as the collector is useful only for confirming local HEP
-generation. It does not test network routing, firewalls, MON01, or HOMER
-ingestion. Do not print or publish complete generated Sofia XML because it can
-contain SIP gateway credentials.
-
-Allow PBX source addresses to reach MON01 on UDP 9060. TCP 9060 is supported as
-an alternative. Do not expose the HOMER UI publicly just to ingest HEP.
+Detailed runtime, saved-ID, packet-arrival, and firewall checks are in
+[Operations: SIP is absent from HOMER](../docs/OPERATIONS.md#sip-is-absent-from-homer).
+Capture starts with new SIP traffic; it does not backfill earlier calls. Clear
+any HOMER filter restricted to an older PBX when checking the new node.
 
 ### Manual XML fallback
 
@@ -135,6 +185,11 @@ and 9282 only from MON01 or the monitoring VPN, then replace the examples under
 
 ## 3. Logs with Grafana Alloy
 
+This section is for application and system log files in Grafana/Loki. Skip it
+when the requested "logs" are SIP messages or call flows in HOMER; use
+[native SIP capture](#1-native-hep-capture) instead. The presence of this Alloy
+template in the repository does not mean Alloy is installed on an existing PBX.
+
 Install the current Grafana Alloy package, copy `alloy/config.alloy` into its
 configuration directory, and set `PBX_NAME` and `LOKI_URL` in the Alloy service
 environment. The example assumes a private VPN address. For that layout, bind
@@ -142,25 +197,18 @@ the central services to MON01's VPN address with `UI_BIND_ADDRESS`. If using an
 authenticated TLS reverse proxy instead, add its `basic_auth` block to the Alloy
 endpoint. The central Compose stack binds Loki to loopback by default.
 
+`UI_BIND_ADDRESS` also controls Grafana, HOMER UI, Prometheus, Alertmanager,
+and Pushgateway; changing it affects all those published interfaces, not just
+Loki. It is not part of adding a native HEP sender.
+
 Grant the Alloy service account read access to only the selected log files.
 Remove unused paths from `config.alloy` so nonexistent or sensitive logs are not
 collected.
 
 ## 4. Centralized RTCP quality
 
-Enable `rtcp-audio-interval-msec=5000` through the FS PBX Sofia profile editor
-on every profile that carries media. Applying a profile change can affect calls
-and registrations, so follow the platform's maintenance procedure.
-
-Set and export `fire_rtcp_events=true` early in the applicable dialplan, before
-media starts, so FreeSWITCH publishes its own receiver reports for both call
-legs. Use the PBX's managed dialplan editor so regeneration preserves it.
-
-Then install the live sensor on each physical PBX:
-
-```bash
-sudo ./rtcp-quality/install.sh --monitoring-ip MON01_IP
-```
+Follow [Enable RTCP quality stats on the new node](#enable-rtcp-quality-stats-on-the-new-node)
+above for the FS PBX settings, reporter installation, and test call.
 
 The reporter reads parsed RTCP events from loopback-only ESL. FreeSWITCH has
 already authenticated and decrypted SRTCP, so no SRTP keys or media payloads
