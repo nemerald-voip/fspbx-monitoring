@@ -72,9 +72,24 @@ Internal exporters communicate only on the Compose bridge network. The central
 node_exporter mounts the host root read-only and uses the host PID namespace so
 Prometheus can observe MON01.
 
+The `ops/install-homer-api.sh` entry point installs host Nginx and Certbot, outside
+Compose. On one explicit IPv4 address, TCP 80 serves only HTTP-01 challenges and
+TCP 443 reuses `ALLOWED_PBX_SOURCES` from `/etc/fs-monitoring/pbx-access.env`.
+`fspbx-access.service` invokes `ops/apply-pbx-access.sh` to restrict Docker HEP
+ingest and refresh the managed proxy's allowlist. The earlier HEP-named service,
+helper, and inventory remain supported for existing installations.
+The proxy forwards three POST transaction operations (messages, PCAP export,
+QoS) to loopback HOMER. Other
+paths are denied. No IPv6 listener is created. Compose enables HOMER's
+`Auth-Token` authentication on every installation; no `.env` opt-in is needed.
+Tokens must still be created, and HTTPS provisioned with each host's settings.
+Both source restrictions and token authentication apply. See
+[HOMER API](HOMER_API.md) for firewall policy, renewal, and verification.
+
 PBX-side requirements:
 
 - HEP: PBX to MON01 UDP 9060; TCP is also supported.
+- Call History API: FS PBX application to MON01 HTTPS TCP 443 after HTTPS provisioning.
 - RTCP quality: PBX to MON01 on the same HEP transport and allowlist.
 - node_exporter: MON01 to PBX TCP 9100.
 - freeswitch_exporter: MON01 to PBX TCP 9282.
@@ -183,6 +198,11 @@ They are deleted by explicit volume-removal operations.
    checks for `/opt/monitoring/compose.yaml` and `/opt/monitoring/.env`.
 4. If both exist, it runs `docker compose up -d --remove-orphans` once.
 5. The one-shot service exits; Docker continues supervising containers.
+
+With HTTPS provisioned, systemd also starts Nginx and `certbot.timer`.
+Certificate/renewal state lives in `/etc/letsencrypt`, outside Docker volumes.
+A deploy hook validates and reloads Nginx after renewal. Endpoint failure affects
+trace retrieval only.
 
 The reconciler also recreates the declared stack after a previous
 `docker compose down`, as long as `.env` and the deployment files remain.

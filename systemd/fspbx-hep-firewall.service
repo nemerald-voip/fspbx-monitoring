@@ -1,5 +1,6 @@
 [Unit]
-Description=Restrict Docker-published HEP to approved IPv4 PBX sources
+# Compatibility unit for existing installations; new hosts use fspbx-access.
+Description=Apply PBX access restrictions (legacy HEP firewall unit)
 Requires=docker.service
 After=docker.service
 Before=monitoring-reconcile.service

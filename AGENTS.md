@@ -71,8 +71,12 @@ logs and the relevant Prometheus target or UI.
 - `compose.yaml`: complete central service topology and image pins.
 - `.env.example`: safe template, bind defaults, retention, and image versions.
 - `systemd/monitoring-reconcile.service`: boot-time Compose reconciler template.
-- `systemd/fspbx-hep-firewall.service`: optional, explicit HEP allowlist unit.
-- `ops/apply-hep-firewall.sh`: optional Docker iptables IPv4 allowlist helper.
+- `systemd/fspbx-access.service`: optional, explicit shared PBX access unit.
+- `ops/apply-pbx-access.sh`: Docker HEP allowlist and managed API proxy synchronization.
+- `ops/pbx-access.env.example`: shared PBX IPv4 source inventory template.
+- `ops/install-homer-api.sh`: HTTPS certificate/proxy installer using that inventory.
+- Legacy `fspbx-hep-firewall.service`, `apply-hep-firewall.sh`, and
+  `/etc/fs-monitoring/hep-firewall.env` remain supported for existing hosts.
 - `scripts/init-secrets.sh`: creates `.env` once with mode `0600`.
 - `scripts/check-config.sh`: validates the local deployment using `.env`.
 - `scripts/check-repository.sh`: CI-safe repository validation using
@@ -146,8 +150,9 @@ The following files are intentionally local and must remain ignored:
 - `prometheus/targets/*.yml`
 - `*.pcap` and `*.pcapng`
 - `backups/` and `data/`
-- `/etc/fs-monitoring/hep-firewall.env` (outside Git, when the optional host
+- `/etc/fs-monitoring/pbx-access.env` (outside Git, when the optional host
   allowlist is enabled)
+- `/etc/fs-monitoring/hep-firewall.env` (legacy name of the same local inventory)
 
 Do not infer that `.env` exists or that the stack is running. Inspect first:
 

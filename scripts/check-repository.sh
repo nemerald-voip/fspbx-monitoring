@@ -11,6 +11,8 @@ done
 
 ./install.sh --help >/dev/null
 ./pbx-agent/rtcp-quality/install.sh --help >/dev/null
+./ops/install-homer-api.sh --help >/dev/null
+python3 scripts/test_homer_api.py
 python3 pbx-agent/rtcp-quality/test_freeswitch_rtcp_to_hep.py
 ./scripts/check-docs.sh
 ./scripts/test-install.sh
@@ -34,6 +36,10 @@ grep -q '^ExecStart=/usr/bin/docker compose up -d --remove-orphans$' \
   systemd/monitoring-reconcile.service
 grep -q '^ExecStart=/opt/monitoring/ops/apply-hep-firewall.sh$' \
   systemd/fspbx-hep-firewall.service
+grep -q '^ExecStart=/opt/monitoring/ops/apply-pbx-access.sh$' \
+  systemd/fspbx-access.service
+grep -q '^EnvironmentFile=/etc/fs-monitoring/pbx-access.env$' \
+  systemd/fspbx-access.service
 rtcp_unit=pbx-agent/rtcp-quality/freeswitch-rtcp-to-hep.service
 grep -q '^ExecStart=/usr/bin/python3 /usr/local/sbin/freeswitch-rtcp-to-hep --config /etc/freeswitch-rtcp-to-hep/config.json$' \
   "$rtcp_unit"

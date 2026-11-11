@@ -15,8 +15,13 @@ Alloy is only needed for separate
 ### Add another FS PBX to an existing HOMER
 
 These steps assume MON01 already runs HOMER and the persistent
-`fspbx-hep-firewall.service` allowlist. For a new monitoring host, complete
+`fspbx-access.service` allowlist. For a new monitoring host, complete
 [Getting started](../docs/GETTING_STARTED.md) first.
+
+If MON01 still uses the earlier names, keep `fspbx-hep-firewall.service`,
+`/etc/fs-monitoring/hep-firewall.env`, and `ALLOWED_HEP_SOURCES` in the steps
+below. They remain supported. The [optional rename procedure](../docs/FIREWALL.md#rename-an-existing-hep-firewall-installation)
+preserves the approved addresses; do not create a second inventory.
 
 **1. Configure and save SIP Capture on the new FS PBX.**
 
@@ -41,25 +46,25 @@ profiles.
 On MON01:
 
 ```bash
-sudoedit /etc/fs-monitoring/hep-firewall.env
+sudoedit /etc/fs-monitoring/pbx-access.env
 ```
 
-Append `NEW_PBX_IP/32` to `ALLOWED_HEP_SOURCES`, keeping every existing entry
+Append `NEW_PBX_IP/32` to `ALLOWED_PBX_SOURCES`, keeping every existing entry
 inside the quotes. Use the source IPv4 address MON01 sees (the PBX's public/NAT
 or VPN address). For example, with an existing source and one new source:
 
 ```dotenv
-ALLOWED_HEP_SOURCES="203.0.113.10/32 198.51.100.24/32"
+ALLOWED_PBX_SOURCES="203.0.113.10/32 198.51.100.24/32"
 ```
 
 Those are documentation addresses; use your real addresses. This is
-`/etc/fs-monitoring/hep-firewall.env`, **not** `/opt/monitoring/.env`.
+`/etc/fs-monitoring/pbx-access.env`, **not** `/opt/monitoring/.env`.
 If a provider firewall also restricts HEP, allow the new source there too.
 
-**3. Restart the HEP firewall service on MON01.**
+**3. Restart the PBX access service on MON01.**
 
 ```bash
-sudo systemctl restart fspbx-hep-firewall.service
+sudo systemctl restart fspbx-access.service
 ```
 
 Make a new test call and check HOMER's recent time range for the new capture ID.

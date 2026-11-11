@@ -55,8 +55,8 @@ IPv4 address on external interface `eth0` with:
 cd /opt/monitoring
 sudo env \
   EXTERNAL_INTERFACE=eth0 \
-  ALLOWED_HEP_SOURCES='203.0.113.10/32' \
-  ./ops/apply-hep-firewall.sh
+  ALLOWED_PBX_SOURCES='203.0.113.10/32' \
+  ./ops/apply-pbx-access.sh
 ```
 
 Replace `eth0` and the documentation address before running it. The helper is
@@ -190,6 +190,13 @@ Then open:
 Loki and Pushgateway are APIs rather than general operator UIs. Keep them
 private. If you later publish an interface through a reverse proxy, configure
 TLS and authentication first and review the bind settings in `.env`.
+
+For FS PBX Call History, follow [HOMER API HTTPS deployment](HOMER_API.md).
+Its HTTPS installer serves only certificate challenges on port 80 and
+restricts the SIP/PCAP/QoS API on port 443 using the existing PBX source list. The
+normal stack installer enables HOMER API-token authentication automatically;
+complete HTTPS provisioning once per server with its hostname and account email.
+The normal installer does not open firewall ports or invent those host settings.
 
 ## 6. Configure the first PBX
 

@@ -61,14 +61,19 @@ Compose plugin, and an invalid Compose model.
 
 ## Add another FS PBX to HOMER
 
-On an existing MON01 with the HEP firewall service installed:
+On an existing MON01 with the PBX access service installed:
+
+Hosts using the earlier names can keep `/etc/fs-monitoring/hep-firewall.env`,
+`ALLOWED_HEP_SOURCES`, and `fspbx-hep-firewall.service` in the steps below.
+The [optional rename procedure](FIREWALL.md#rename-an-existing-hep-firewall-installation)
+preserves the inventory; do not create a second list.
 
 1. On the new FS PBX, open **System Settings -> SIP Capture**, enable capture,
    use the working node's collector address/transport and port `9060`, select
    the SIP profiles, and **Save**. A numeric **Capture ID** should appear.
-2. On MON01, edit `/etc/fs-monitoring/hep-firewall.env` and append the new PBX
-   source IP with `/32` to `ALLOWED_HEP_SOURCES`, preserving existing entries.
-3. Run `sudo systemctl restart fspbx-hep-firewall.service` on MON01.
+2. On MON01, edit `/etc/fs-monitoring/pbx-access.env` and append the new PBX
+   source IP with `/32` to `ALLOWED_PBX_SOURCES`, preserving existing entries.
+3. Run `sudo systemctl restart fspbx-access.service` on MON01.
 
 The [three-step setup guide](../pbx-agent/README.md#add-another-fs-pbx-to-an-existing-homer)
 lists the screen fields and an allowlist example. If a provider firewall also
@@ -80,6 +85,27 @@ For call-quality stats, also complete
 enable `rtcp-audio-interval-msec=5000`, export `fire_rtcp_events=true` before
 media, and install the reporter on that PBX. It reuses the same HEP allowlist.
 Verify a new call in HOMER's **QoS** tab; SIP capture alone does not enable it.
+
+## FS PBX HOMER API
+
+Use the separate [HTTPS deployment and operations guide](HOMER_API.md).
+The HTTPS installer manages host Nginx (challenge-only TCP 80 and
+IP-restricted TCP 443), Let's Encrypt certificates, and `certbot.timer`.
+Compose enables HOMER API-token authentication for every new or updated
+deployment without a `.env` opt-in. On a Git checkout, use `git pull --ff-only`,
+validate, then `docker compose up -d --no-deps --pull never homer` to apply it.
+`docker compose restart` alone does not reload environment configuration.
+Recreation briefly interrupts capture/search while preserving volumes. The
+HTTPS installer itself does not restart HOMER or change firewalls. Provision
+HTTPS once per host and verify renewal, SIP, PCAP, TXT, and QoS before acceptance.
+
+The HTTPS installer reads `ALLOWED_PBX_SOURCES` from the shared PBX access
+file, with automatic fallback to the legacy HEP file. Do not maintain a second
+API source list. The updated PBX access helper refreshes
+an installed Nginx API allowlist when its service is restarted or applies rules
+on boot. Use `sudo ./ops/install-homer-api.sh --sync-allowlist` to refresh only
+the proxy. A changed list reloads active Nginx or starts it if inactive, including
+during boot. Provider and host INPUT rules for 443 remain separate network policy.
 
 ## Add or change PBX targets
 
@@ -253,7 +279,7 @@ for successful HOMER delivery:
 
    Packets on MON01's external interface prove arrival at the host, but can
    still be dropped by its Docker-aware firewall before reaching HOMER. When
-   the repository's HEP firewall helper is in use, inspect its active rules:
+   the repository's PBX access helper is in use, inspect its active HEP rules:
 
    ```bash
    sudo iptables -n -v -L DOCKER-USER --line-numbers

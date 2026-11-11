@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply shared PBX access restrictions for HEP and the HOMER API
+Requires=docker.service
+After=docker.service
+Before=monitoring-reconcile.service
+PartOf=docker.service
+ConditionPathExists=/etc/fs-monitoring/pbx-access.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/fs-monitoring/pbx-access.env
+ExecStart=/opt/monitoring/ops/apply-pbx-access.sh
+ExecReload=/opt/monitoring/ops/apply-pbx-access.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

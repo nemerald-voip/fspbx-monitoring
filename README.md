@@ -75,6 +75,18 @@ remain local to each FreeSWITCH host.
 Use an SSH tunnel, VPN, or authenticated TLS reverse proxy for operator access.
 The installer intentionally does not modify firewalls.
 
+HOMER API-token authentication is enabled on every installation, including
+existing deployments after their Compose files and HOMER container are updated.
+Complete the [HTTPS deployment guide](docs/HOMER_API.md) with
+`ops/install-homer-api.sh` on each MON01. It adds a Let's Encrypt challenge-only
+listener on TCP 80 and an IP-restricted API proxy on TCP 443. HOMER and the other
+UIs remain on loopback. Initial HTTPS setup requires that server's hostname and
+account email; approved PBX sources are reused from the shared PBX access
+file. Applying that firewall also refreshes an installed API proxy's allowlist.
+New installations use `pbx-access.env` and `fspbx-access.service`; existing
+`hep-firewall.env` and `fspbx-hep-firewall.service` remain supported without
+re-entering addresses. See [PBX access configuration](docs/FIREWALL.md).
+
 ## After installation
 
 Verify the stack:
@@ -100,9 +112,11 @@ To add another FS PBX's SIP messages or call flows to HOMER, follow
 [Add another FS PBX to an existing HOMER](pbx-agent/README.md#add-another-fs-pbx-to-an-existing-homer).
 Save **System Settings -> SIP Capture** on each physical server; **Capture ID**
 must change from **Assigned when saved** to a numeric ID. On MON01, add the
-source IP to `ALLOWED_HEP_SOURCES` in `/etc/fs-monitoring/hep-firewall.env` and
-run `sudo systemctl restart fspbx-hep-firewall.service`. These steps assume the
-HEP firewall service is already installed. Verify a new test call in HOMER.
+source IP to `ALLOWED_PBX_SOURCES` in `/etc/fs-monitoring/pbx-access.env` and
+run `sudo systemctl restart fspbx-access.service`. These steps assume the
+PBX access service is already installed. Verify a new test call in HOMER.
+On an existing host that still uses the legacy names, edit `hep-firewall.env`
+and restart `fspbx-hep-firewall.service` instead; use its existing source variable.
 
 For RTP/RTCP quality in HOMER's **QoS** tab, continue with
 [Enable RTCP quality stats on the new node](pbx-agent/README.md#enable-rtcp-quality-stats-on-the-new-node).
@@ -130,6 +144,7 @@ exact checks.
 - [Architecture, data flows, ports, and persistence](docs/ARCHITECTURE.md)
 - [Operations, upgrades, backups, and troubleshooting](docs/OPERATIONS.md)
 - [Restrict HEP to approved PBX addresses](docs/FIREWALL.md)
+- [Deploy the FS PBX HOMER API with HTTPS](docs/HOMER_API.md)
 - [Centralized RTP/RTCP quality](docs/RTP_QUALITY.md)
 - [Synthetic SIP checks](docs/SYNTHETIC_SIP.md)
 - [PBX-side agent setup](pbx-agent/README.md)
